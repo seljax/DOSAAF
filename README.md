@@ -154,13 +154,3 @@ live_app_designs — настройки визуального редактор�
 □ Серверная сессия (JWT или cookie)
 □ HTTPS (Caddy или Cloudflare)
 □ Ограничение попыток входа
-
-```markdown
-## Скриншоты
-
-### Главная страница
-![Главная](docs/screenshots/main.png)
-
-### Профиль курсанта
-![Профиль](docs/screenshots/profile.png)
-Но это уже на будущее.
