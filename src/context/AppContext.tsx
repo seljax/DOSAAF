@@ -12,14 +12,6 @@ import {
   GroupConfig,
   LearningMaterial,
   ExamSettings,
-  CustomPage,
-  StudentAccount,
-  AdminCredentials,
-  ActivityLog,
-  FooterSettings,
-  NavTabConfig,
-  SiteInfoSettings,
-  AppTheme,
 } from '../types';
 import {
   INITIAL_SIGNS,
@@ -32,14 +24,7 @@ import {
   INITIAL_GROUPS,
   INITIAL_MATERIALS,
   INITIAL_EXAM_SETTINGS,
-  INITIAL_STUDENTS,
-  INITIAL_ADMIN_CREDENTIALS,
-  INITIAL_ACTIVITY_LOGS,
-  INITIAL_FOOTER_SETTINGS,
-  INITIAL_NAV_TABS,
-  INITIAL_SITE_INFO,
 } from '../data/initialData';
-import { INITIAL_CUSTOM_PAGES } from '../data/initialPages';
 
 interface AppContextType {
   currentUser: User | null;
@@ -51,57 +36,6 @@ interface AppContextType {
   isStudentProfileComplete: boolean;
   loginAsAdmin: (login: string, pass: string) => { success: boolean; error?: string };
   logout: () => void;
-
-  // Student accounts management (Admin can create, edit, set password and grant/revoke tab & test access)
-  students: StudentAccount[];
-  addStudent: (student: Omit<StudentAccount, 'id' | 'createdAt'>) => StudentAccount;
-  updateStudent: (id: string, updates: Partial<StudentAccount>) => void;
-  deleteStudent: (id: string) => void;
-  toggleStudentTabAccess: (id: string, tab: keyof StudentAccount['allowedTabs']) => void;
-  toggleStudentTestAccess: (id: string, canTakeTests: boolean) => void;
-  toggleStudentExamAccess: (id: string, canTakeExam: boolean) => void;
-  loginStudentWithPassword: (loginOrName: string, password: string) => { success: boolean; error?: string };
-
-  // Student Profile password change
-  changeStudentPassword: (oldPass: string, newPass: string) => { success: boolean; error?: string };
-
-  // Activity Audit Logs (for Admin tab "ЛОГИ")
-  activityLogs: ActivityLog[];
-  addActivityLog: (log: Omit<ActivityLog, 'id' | 'timestamp' | 'dateStr' | 'timeStr'>) => void;
-  clearActivityLogs: () => void;
-
-  // Footer Settings (Editable by Admin, includes email, phone, school details)
-  footerSettings: FooterSettings;
-  updateFooterSettings: (settings: Partial<FooterSettings>) => void;
-  resetFooterSettings: () => void;
-
-  // Navigation Tabs configuration (Editable order and labels)
-  navTabs: NavTabConfig[];
-  updateNavTab: (id: string, updates: Partial<NavTabConfig>) => void;
-  reorderNavTabs: (tabIds: string[]) => void;
-  resetNavTabs: () => void;
-
-  // Site Info & Changelog (Editable by Admin)
-  siteInfo: SiteInfoSettings;
-  updateSiteInfo: (info: Partial<SiteInfoSettings>) => void;
-  resetSiteInfo: () => void;
-
-  // App Theme Switcher ('light' | 'dark' | 'dosaaf_navy')
-  appTheme: AppTheme;
-  setAppTheme: (theme: AppTheme) => void;
-
-  // Permission helpers
-  canAccessTab: (tabId: string) => boolean;
-  canStudentTakeTests: () => boolean;
-  canStudentTakeExam: () => boolean;
-
-  // Admin Security & Password Recovery
-  adminCredentials: AdminCredentials;
-  updateAdminCredentials: (oldPass: string, newLogin: string, newPass: string) => { success: boolean; error?: string };
-  addRecoveryEmail: (email: string) => { success: boolean; error?: string };
-  removeRecoveryEmail: (email: string) => { success: boolean; error?: string };
-  requestPasswordResetCode: (email: string) => { success: boolean; code?: string; maskedEmail?: string; error?: string };
-  resetAdminPasswordWithCode: (code: string, newLogin: string, newPass: string) => { success: boolean; error?: string };
 
   // Groups configuration (Admin can change group numbers, add new groups, delete groups)
   groups: GroupConfig[];
@@ -154,13 +88,6 @@ interface AppContextType {
   examSettings: ExamSettings;
   updateExamSettings: (settings: Partial<ExamSettings>) => void;
 
-  // Custom Pages & Page Editor
-  customPages: CustomPage[];
-  addCustomPage: (page: Omit<CustomPage, 'id' | 'lastUpdated'>) => string;
-  updateCustomPage: (id: string, page: Partial<CustomPage>) => void;
-  deleteCustomPage: (id: string) => void;
-  resetCustomPages: () => void;
-
   // Tests & Statistics
   testAttempts: TestAttempt[];
   recordTestAttempt: (attempt: Omit<TestAttempt, 'id' | 'timestamp' | 'dateStr'>) => void;
@@ -188,9 +115,6 @@ const STORAGE_KEYS = {
   GROUPS: 'avtoshkola_groups_v2',
   MATERIALS: 'avtoshkola_materials_v2',
   EXAM_SETTINGS: 'avtoshkola_exam_settings_v2',
-  CUSTOM_PAGES: 'avtoshkola_custom_pages_v2',
-  STUDENTS: 'avtoshkola_students_v2',
-  ADMIN_CREDENTIALS: 'avtoshkola_admin_credentials_v2',
 };
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -336,46 +260,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return INITIAL_ATTEMPTS;
   });
 
-  // Custom Pages state
-  const [customPages, setCustomPages] = useState<CustomPage[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.CUSTOM_PAGES);
-      if (saved) return JSON.parse(saved);
-    } catch {
-      // ignore
-    }
-    return INITIAL_CUSTOM_PAGES;
-  });
-
-  // Students state
-  const [students, setStudents] = useState<StudentAccount[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.STUDENTS);
-      if (saved) return JSON.parse(saved);
-    } catch {
-      // ignore
-    }
-    return INITIAL_STUDENTS;
-  });
-
-  // Admin Credentials state
-  const [adminCredentials, setAdminCredentials] = useState<AdminCredentials>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.ADMIN_CREDENTIALS);
-      if (saved) return JSON.parse(saved);
-    } catch {
-      // ignore
-    }
-    return INITIAL_ADMIN_CREDENTIALS;
-  });
-
-  // Password reset session in memory
-  const [passwordResetSession, setPasswordResetSession] = useState<{
-    code: string;
-    email: string;
-    expiresAt: number;
-  } | null>(null);
-
   // Synchronize to localStorage
   useEffect(() => {
     if (currentUser) {
@@ -425,19 +309,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem(STORAGE_KEYS.ATTEMPTS, JSON.stringify(testAttempts));
   }, [testAttempts]);
 
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.CUSTOM_PAGES, JSON.stringify(customPages));
-  }, [customPages]);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.STUDENTS, JSON.stringify(students));
-  }, [students]);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.ADMIN_CREDENTIALS, JSON.stringify(adminCredentials));
-  }, [adminCredentials]);
-
-  // Auth & Student Functions
+  // Auth functions
   const loginAsStudent = (name: string, group: string) => {
     const cleanName = name.trim();
     const newUser: User = {
@@ -466,322 +338,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       currentUser.name.trim().includes(' ')
   );
 
-  // Student accounts management
-  const addStudent = (studentData: Omit<StudentAccount, 'id' | 'createdAt'>): StudentAccount => {
-    const cleanFirst = studentData.firstName.trim();
-    const cleanLast = studentData.lastName.trim();
-    const fullName = `${cleanLast} ${cleanFirst}`.trim() || `${cleanFirst} ${cleanLast}`.trim();
-    const cleanLogin = studentData.login.trim() || `kursant_${Date.now().toString().slice(-4)}`;
-    const newStudent: StudentAccount = {
-      ...studentData,
-      id: `student_${Date.now()}`,
-      firstName: cleanFirst,
-      lastName: cleanLast,
-      fullName,
-      login: cleanLogin,
-      password: studentData.password.trim(),
-      createdAt: Date.now(),
-    };
-    setStudents((prev) => [newStudent, ...prev]);
-    return newStudent;
-  };
-
-  const updateStudent = (id: string, updates: Partial<StudentAccount>) => {
-    setStudents((prev) =>
-      prev.map((s) => {
-        if (s.id !== id) return s;
-        const updated = { ...s, ...updates };
-        if (updates.firstName !== undefined || updates.lastName !== undefined) {
-          const first = (updates.firstName ?? s.firstName).trim();
-          const last = (updates.lastName ?? s.lastName).trim();
-          updated.fullName = `${last} ${first}`.trim() || `${first} ${last}`.trim();
-        }
-        return updated;
-      })
-    );
-
-    // If current logged-in user is this student, sync their session
-    if (currentUser?.studentId === id) {
-      setCurrentUser((prev) => {
-        if (!prev) return null;
-        return {
-          ...prev,
-          name: updates.fullName || (updates.firstName ? `${updates.lastName || prev.lastName} ${updates.firstName}` : prev.name),
-          group: updates.group || prev.group,
-          allowedTabs: updates.allowedTabs || prev.allowedTabs,
-          canTakeTests: updates.canTakeTests !== undefined ? updates.canTakeTests : prev.canTakeTests,
-          canTakeExam: updates.canTakeExam !== undefined ? updates.canTakeExam : prev.canTakeExam,
-        };
-      });
-    }
-  };
-
-  const deleteStudent = (id: string) => {
-    setStudents((prev) => prev.filter((s) => s.id !== id));
-    if (currentUser?.studentId === id) {
-      logout();
-    }
-  };
-
-  const toggleStudentTabAccess = (id: string, tab: keyof StudentAccount['allowedTabs']) => {
-    setStudents((prev) =>
-      prev.map((s) => {
-        if (s.id !== id) return s;
-        const newAllowed = {
-          ...s.allowedTabs,
-          [tab]: !s.allowedTabs[tab],
-        };
-        return { ...s, allowedTabs: newAllowed };
-      })
-    );
-
-    if (currentUser?.studentId === id) {
-      setCurrentUser((prev) => {
-        if (!prev) return null;
-        const currentAllowed = prev.allowedTabs || { rules: true, materials: true, lessons: true, schedule: true };
-        return {
-          ...prev,
-          allowedTabs: {
-            ...currentAllowed,
-            [tab]: !currentAllowed[tab],
-          },
-        };
-      });
-    }
-  };
-
-  const toggleStudentTestAccess = (id: string, canTakeTests: boolean) => {
-    updateStudent(id, { canTakeTests });
-  };
-
-  const toggleStudentExamAccess = (id: string, canTakeExam: boolean) => {
-    updateStudent(id, { canTakeExam });
-  };
-
-  const loginStudentWithPassword = (loginOrName: string, pass: string): { success: boolean; error?: string } => {
-    const q = loginOrName.trim().toLowerCase();
-    const cleanPass = pass.trim();
-
-    if (!q) {
-      return { success: false, error: 'Введите имя/фамилию или логин курсанта' };
-    }
-    if (!cleanPass) {
-      return { success: false, error: 'Введите пароль курсанта' };
-    }
-
-    const matched = students.find((s) => {
-      const matchLogin = s.login.toLowerCase() === q;
-      const matchFull = s.fullName.toLowerCase() === q;
-      const matchReverse = `${s.firstName} ${s.lastName}`.toLowerCase() === q || `${s.lastName} ${s.firstName}`.toLowerCase() === q;
-      const matchLast = s.lastName.toLowerCase() === q;
-      return matchLogin || matchFull || matchReverse || matchLast;
-    });
-
-    if (!matched) {
-      return {
-        success: false,
-        error: 'Курсант с такими данными не найден. Обратитесь к администратору для регистрации в системе ДОСААФ',
-      };
-    }
-
-    if (matched.status === 'blocked') {
-      return {
-        success: false,
-        error: 'Ваша учетная запись временно заблокирована администратором автошколы',
-      };
-    }
-
-    if (matched.password !== cleanPass) {
-      return {
-        success: false,
-        error: 'Неверный пароль курсанта. Обратитесь к преподавателю или администратору автошколы',
-      };
-    }
-
-    // Update lastLoginAt
-    updateStudent(matched.id, { lastLoginAt: Date.now() });
-
-    const studentUser: User = {
-      id: matched.id,
-      studentId: matched.id,
-      name: matched.fullName,
-      firstName: matched.firstName,
-      lastName: matched.lastName,
-      login: matched.login,
-      group: matched.group,
-      isAdmin: false,
-      allowedTabs: matched.allowedTabs,
-      canTakeTests: matched.canTakeTests,
-      canTakeExam: matched.canTakeExam,
-    };
-
-    setCurrentUser(studentUser);
-    setSelectedGroupTabState(matched.group);
-    localStorage.setItem(STORAGE_KEYS.GROUP_FILTER, matched.group);
-
-    return { success: true };
-  };
-
-  // Permission helpers
-  const canAccessTab = (tabId: string): boolean => {
-    if (currentUser?.isAdmin) return true;
-    if (tabId === 'stats') return false; // Statistics is admin only
-    if (tabId === 'tests') return true; // Tab is accessible; quizzes and exams checked individually
-    if (currentUser?.allowedTabs) {
-      const key = tabId as keyof StudentAccount['allowedTabs'];
-      if (currentUser.allowedTabs[key] !== undefined) {
-        return Boolean(currentUser.allowedTabs[key]);
-      }
-    }
-    return true;
-  };
-
-  const canStudentTakeTests = (): boolean => {
-    if (currentUser?.isAdmin) return true;
-    if (currentUser?.canTakeTests !== undefined) {
-      return currentUser.canTakeTests;
-    }
-    return true;
-  };
-
-  const canStudentTakeExam = (): boolean => {
-    if (currentUser?.isAdmin) return true;
-    if (!examSettings.isOpen) return false;
-    if (currentUser?.canTakeExam !== undefined) {
-      return currentUser.canTakeExam;
-    }
-    return true;
-  };
-
-  // Admin Security Functions
   const loginAsAdmin = (login: string, pass: string) => {
-    const cleanLogin = login.trim().toLowerCase();
-    const adminLogin = adminCredentials.login.trim().toLowerCase();
-
-    if (cleanLogin === adminLogin && pass === adminCredentials.passwordHash) {
+    if (login.trim() === 'seljax' && pass === 'fgy36lol90k') {
       const adminUser: User = {
         id: 'admin-seljax',
-        name: `Администратор (${adminCredentials.login})`,
+        name: 'Администратор (seljax)',
         group: groups[0]?.id || 'group7_mkpp',
         isAdmin: true,
       };
       setCurrentUser(adminUser);
       return { success: true };
     }
-    return { success: false, error: 'Неверный логин или пароль администратора' };
-  };
-
-  const updateAdminCredentials = (oldPass: string, newLogin: string, newPass: string) => {
-    if (oldPass !== adminCredentials.passwordHash) {
-      return { success: false, error: 'Неверно указан текущий пароль администратора' };
-    }
-    const cleanLogin = newLogin.trim();
-    if (!cleanLogin) {
-      return { success: false, error: 'Логин не может быть пустым' };
-    }
-    if (newPass.length < 4) {
-      return { success: false, error: 'Новый пароль должен содержать не менее 4 символов' };
-    }
-
-    const updated: AdminCredentials = {
-      ...adminCredentials,
-      login: cleanLogin,
-      passwordHash: newPass,
-      lastChangedAt: Date.now(),
-    };
-    setAdminCredentials(updated);
-
-    if (currentUser?.isAdmin) {
-      setCurrentUser((prev) => (prev ? { ...prev, name: `Администратор (${cleanLogin})` } : null));
-    }
-
-    return { success: true };
-  };
-
-  const addRecoveryEmail = (email: string) => {
-    const cleanEmail = email.trim().toLowerCase();
-    if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
-      return { success: false, error: 'Введите корректный адрес электронной почты' };
-    }
-    if (adminCredentials.recoveryEmails.map((e) => e.toLowerCase()).includes(cleanEmail)) {
-      return { success: false, error: 'Этот адрес уже добавлен в список восстановления' };
-    }
-    const updatedEmails = [...adminCredentials.recoveryEmails, cleanEmail];
-    setAdminCredentials((prev) => ({
-      ...prev,
-      recoveryEmails: updatedEmails,
-    }));
-    return { success: true };
-  };
-
-  const removeRecoveryEmail = (email: string) => {
-    if (adminCredentials.recoveryEmails.length <= 1) {
-      return; // Leave at least one email
-    }
-    const clean = email.trim().toLowerCase();
-    setAdminCredentials((prev) => ({
-      ...prev,
-      recoveryEmails: prev.recoveryEmails.filter((e) => e.toLowerCase() !== clean),
-    }));
-  };
-
-  const requestPasswordResetCode = (email: string) => {
-    const clean = email.trim().toLowerCase();
-    const isKnown = adminCredentials.recoveryEmails.some((e) => e.toLowerCase() === clean);
-    if (!isKnown) {
-      return {
-        success: false,
-        error: 'Указанный email не найден в списке доверенных резервных адресов администратора',
-      };
-    }
-
-    // Generate 6-digit code
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    setPasswordResetSession({
-      code,
-      email: clean,
-      expiresAt: Date.now() + 15 * 60 * 1000, // 15 min
-    });
-
-    const [userPart, domainPart] = clean.split('@');
-    const maskedUser = userPart.length > 2 ? `${userPart[0]}***${userPart[userPart.length - 1]}` : `${userPart[0]}***`;
-    const maskedEmail = `${maskedUser}@${domainPart}`;
-
-    return {
-      success: true,
-      code,
-      maskedEmail,
-    };
-  };
-
-  const resetAdminPasswordWithCode = (code: string, newLogin: string, newPass: string) => {
-    if (!passwordResetSession) {
-      return { success: false, error: 'Сессия сброса не найдена. Запросите проверочный код' };
-    }
-    if (Date.now() > passwordResetSession.expiresAt) {
-      setPasswordResetSession(null);
-      return { success: false, error: 'Срок действия проверочного кода истек (15 минут)' };
-    }
-    if (code.trim() !== passwordResetSession.code) {
-      return { success: false, error: 'Неверный проверочный код из письма' };
-    }
-    const cleanLogin = newLogin.trim();
-    if (!cleanLogin) {
-      return { success: false, error: 'Логин не может быть пустым' };
-    }
-    if (newPass.length < 4) {
-      return { success: false, error: 'Новый пароль должен содержать не менее 4 символов' };
-    }
-
-    setAdminCredentials((prev) => ({
-      ...prev,
-      login: cleanLogin,
-      passwordHash: newPass,
-      lastChangedAt: Date.now(),
-    }));
-    setPasswordResetSession(null);
-
-    return { success: true };
+    return { success: false, error: 'Неверный логин или пароль администратора! Забыли чтоль?' };
   };
 
   const logout = () => {
@@ -1005,42 +573,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setTestAttempts((prev) => prev.filter((a) => a.userId !== userId));
   };
 
-  // Custom Pages (Page Editor)
-  const addCustomPage = (pageData: Omit<CustomPage, 'id' | 'lastUpdated'>) => {
-    const now = new Date();
-    const dateStr = `${String(now.getDate()).padStart(2, '0')}.${String(
-      now.getMonth() + 1
-    ).padStart(2, '0')}.${now.getFullYear()}`;
-    const newId = `page-${Date.now()}`;
-
-    const newPage: CustomPage = {
-      ...pageData,
-      id: newId,
-      lastUpdated: dateStr,
-    };
-    setCustomPages((prev) => [newPage, ...prev]);
-    return newId;
-  };
-
-  const updateCustomPage = (id: string, pageUpdates: Partial<CustomPage>) => {
-    const now = new Date();
-    const dateStr = `${String(now.getDate()).padStart(2, '0')}.${String(
-      now.getMonth() + 1
-    ).padStart(2, '0')}.${now.getFullYear()}`;
-
-    setCustomPages((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, ...pageUpdates, lastUpdated: dateStr } : p))
-    );
-  };
-
-  const deleteCustomPage = (id: string) => {
-    setCustomPages((prev) => prev.filter((p) => p.id !== id));
-  };
-
-  const resetCustomPages = () => {
-    setCustomPages(INITIAL_CUSTOM_PAGES);
-  };
-
   // Reset to initial defaults
   const resetToDefaults = () => {
     setGroups(INITIAL_GROUPS);
@@ -1053,9 +585,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setMaterials(INITIAL_MATERIALS);
     setExamSettings(INITIAL_EXAM_SETTINGS);
     setTestAttempts(INITIAL_ATTEMPTS);
-    setCustomPages(INITIAL_CUSTOM_PAGES);
-    setStudents(INITIAL_STUDENTS);
-    setAdminCredentials(INITIAL_ADMIN_CREDENTIALS);
   };
 
   // Export & Import
@@ -1072,9 +601,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       materials,
       examSettings,
       testAttempts,
-      customPages,
-      students,
-      adminCredentials,
     };
     return JSON.stringify(exportObject, null, 2);
   };
@@ -1092,9 +618,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (parsed.materials && Array.isArray(parsed.materials)) setMaterials(parsed.materials);
       if (parsed.examSettings) setExamSettings(parsed.examSettings);
       if (parsed.testAttempts && Array.isArray(parsed.testAttempts)) setTestAttempts(parsed.testAttempts);
-      if (parsed.customPages && Array.isArray(parsed.customPages)) setCustomPages(parsed.customPages);
-      if (parsed.students && Array.isArray(parsed.students)) setStudents(parsed.students);
-      if (parsed.adminCredentials) setAdminCredentials(parsed.adminCredentials);
       return { success: true };
     } catch {
       return { success: false, error: 'Ошибка разбора JSON файла' };
@@ -1113,23 +636,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isStudentProfileComplete,
         loginAsAdmin,
         logout,
-        students,
-        addStudent,
-        updateStudent,
-        deleteStudent,
-        toggleStudentTabAccess,
-        toggleStudentTestAccess,
-        toggleStudentExamAccess,
-        loginStudentWithPassword,
-        canAccessTab,
-        canStudentTakeTests,
-        canStudentTakeExam,
-        adminCredentials,
-        updateAdminCredentials,
-        addRecoveryEmail,
-        removeRecoveryEmail,
-        requestPasswordResetCode,
-        resetAdminPasswordWithCode,
         groups,
         addGroup,
         updateGroup,
@@ -1169,11 +675,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         recordTestAttempt,
         deleteTestAttempt,
         clearMyAttempts,
-        customPages,
-        addCustomPage,
-        updateCustomPage,
-        deleteCustomPage,
-        resetCustomPages,
         resetToDefaults,
         exportDataJson,
         importDataJson,
