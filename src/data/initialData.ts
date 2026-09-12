@@ -830,7 +830,6 @@ export const INITIAL_NAV_TABS: NavTabConfig[] = [
   { id: 'materials', label: 'Полезные материалы', isVisible: true, order: 3 },
   { id: 'lessons', label: 'Пройденные занятия', isVisible: true, order: 4 },
   { id: 'schedule', label: 'Расписание', isVisible: true, order: 5 },
-  { id: 'about', label: 'Информация о сайте', isVisible: true, order: 6 },
 ];
 
 export const INITIAL_SITE_INFO: SiteInfoSettings = {
