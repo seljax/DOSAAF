@@ -1,6 +1,6 @@
 import React from 'react';
 import { useApp } from '../context/AppContext';
-import { BookOpen, CheckSquare, Compass, GraduationCap, CalendarClock, ShieldCheck, Lock } from 'lucide-react';
+import { BookOpen, CheckSquare, Compass, GraduationCap, CalendarClock, ShieldCheck, Lock, User as UserIcon } from 'lucide-react';
 
 interface BottomNavProps {
   activeTab: string;
@@ -8,15 +8,17 @@ interface BottomNavProps {
 }
 
 export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab }) => {
-  const { isAdmin, canAccessTab } = useApp();
+  const { isAdmin, currentUser, canAccessTab } = useApp();
+
+  const isStudentLoggedIn = Boolean(currentUser && currentUser.name && !isAdmin);
 
   const navItems = [
     { id: 'rules', label: 'ПДД', icon: BookOpen },
     { id: 'tests', label: 'Тесты', icon: CheckSquare },
     { id: 'materials', label: 'Материалы', icon: Compass },
     { id: 'lessons', label: 'Лекции', icon: GraduationCap },
-    isAdmin
-      ? { id: 'stats', label: 'Ведомость', icon: ShieldCheck }
+    isAdmin || isStudentLoggedIn
+      ? { id: 'profile', label: 'Профиль', icon: UserIcon }
       : { id: 'schedule', label: 'График', icon: CalendarClock },
   ];
 

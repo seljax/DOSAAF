@@ -347,18 +347,33 @@ export const RulesAndSignsView: React.FC = () => {
                     </div>
 
                     {/* SVG or Image Graphic */}
-                    <div className="my-1 group-hover:scale-105 transition-transform duration-200 flex items-center justify-center">
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setViewingSign(sign);
+                      }}
+                      className="my-1 group-hover:scale-105 transition-transform duration-200 flex items-center justify-center cursor-pointer"
+                    >
                       <RoadSignSvg sign={sign} size="md" />
                     </div>
 
                     {/* Name & Meaning preview */}
-                    <div className="w-full mt-2">
-                      <h4 className="font-bold text-xs text-neutral-900 line-clamp-2 leading-tight">
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setViewingSign(sign);
+                      }}
+                      className="w-full mt-2 cursor-pointer"
+                    >
+                      <h4 className="font-bold text-xs text-neutral-900 group-hover:text-blue-600 transition-colors line-clamp-2 leading-tight">
                         {title}
                       </h4>
                       <p className="text-[11px] text-neutral-500 line-clamp-1 mt-1">
                         {subtitle}
                       </p>
+                      <div className="mt-2 pt-1 border-t border-neutral-100 flex items-center justify-center text-[10px] text-blue-600 font-medium opacity-0 group-hover:opacity-100 transition-opacity">
+                        Нажмите для описания
+                      </div>
                     </div>
                   </>
                 )}

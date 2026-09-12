@@ -23,6 +23,7 @@ import {
 import { AuthModal } from './AuthModal';
 import { GroupSettingsModal } from './GroupSettingsModal';
 import { StudentManagementModal } from './StudentManagementModal';
+import { NavTabsEditorModal } from './NavTabsEditorModal';
 import { EditableDesignBlock } from './EditableDesignBlock';
 
 interface NavbarProps {
@@ -43,12 +44,14 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
     groups,
     getGroupName,
     canAccessTab,
+    navTabs,
   } = useApp();
   const { isDesignMode, toggleDesignMode } = useDesignEditor();
 
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
   const [isStudentModalOpen, setIsStudentModalOpen] = useState(false);
+  const [isNavTabsModalOpen, setIsNavTabsModalOpen] = useState(false);
 
   const group1 = groups.find((g) => g.id === 'group7_mkpp') || groups[0];
   const group2 = groups.find((g) => g.id === 'group8_akpp') || groups[1];
@@ -103,7 +106,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
               <ShieldCheck className="w-3.5 h-3.5" />
               <span>Режим администратора ({adminCredentials.login}) — Полный доступ и управление</span>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <button
                 onClick={() => setIsStudentModalOpen(true)}
                 className="bg-neutral-900 hover:bg-neutral-950 text-white px-3 py-1 rounded text-[11px] font-bold flex items-center gap-1.5 transition-colors shadow-xs"
@@ -113,16 +116,36 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
                 <span>Курсанты и безопасность</span>
               </button>
               <button
+                onClick={() => setActiveTab('logs')}
+                className={`px-3 py-1 rounded text-[11px] font-bold flex items-center gap-1.5 transition-all shadow-xs ${
+                  activeTab === 'logs'
+                    ? 'bg-neutral-950 text-amber-300 ring-2 ring-amber-300'
+                    : 'bg-amber-800 hover:bg-neutral-900 text-white'
+                }`}
+                title="Журнал действий курсантов (смена паролей, входы, тестирование)"
+              >
+                <FileText className="w-3.5 h-3.5 text-amber-300" />
+                <span>ЛОГИ</span>
+              </button>
+              <button
+                onClick={() => setIsNavTabsModalOpen(true)}
+                className="bg-amber-700 hover:bg-amber-800 px-2.5 py-1 rounded text-[11px] font-bold flex items-center gap-1.5 transition-colors shadow-xs"
+                title="Настроить порядок и названия вкладок меню"
+              >
+                <Edit3 className="w-3 h-3" />
+                <span>Вкладки меню</span>
+              </button>
+              <button
                 onClick={toggleDesignMode}
                 className={`px-3 py-1 rounded text-[11px] font-bold flex items-center gap-1.5 transition-all shadow-xs ${
                   isDesignMode
                     ? 'bg-neutral-950 text-amber-300 ring-2 ring-amber-300'
                     : 'bg-amber-800 hover:bg-neutral-900 text-white'
                 }`}
-                title="Включить визуальный редактор Elementor: кликайте элементы мышкой и перемещайте их"
+                title="Включить визуальный Редактор: кликайте элементы мышкой и перемещайте их"
               >
                 <Palette className="w-3.5 h-3.5 text-amber-400" />
-                <span>Редактор Elementor: {isDesignMode ? 'ВКЛ' : 'ВЫКЛ'}</span>
+                <span>Редактор: {isDesignMode ? 'ВКЛ' : 'ВЫКЛ'}</span>
               </button>
               <button
                 onClick={() => setIsGroupModalOpen(true)}
@@ -166,7 +189,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
             <div className="flex items-center gap-2">
               <MousePointer className="w-3.5 h-3.5 text-sky-400 animate-bounce" />
               <span>
-                <strong>Редактор Elementor активен:</strong> Кликайте любой элемент страницы (включая шапку) для редактирования стиля/текста или перетаскивайте карточки мышкой!
+                <strong>Редактор активен:</strong> Кликайте любой элемент страницы (включая шапку) для редактирования стиля/текста или перетаскивайте карточки мышкой!
               </span>
             </div>
             <button
@@ -209,9 +232,12 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
               >
                 {({ title, badge }) => (
                   <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
-                    <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-blue-700 via-blue-800 to-indigo-900 flex items-center justify-center text-white shadow-xs shrink-0">
-                      <Car className="w-5 h-5 sm:w-5.5 sm:h-5.5" />
-                    </div>
+                    <img
+                      src="/favicon.jpeg"
+                      alt="ДОСААФ РОССИИ"
+                      className="w-9 h-9 sm:w-10 sm:h-10 rounded-full object-contain shadow-xs shrink-0 ring-1 ring-neutral-200 dark:ring-neutral-700 bg-white"
+                      referrerPolicy="no-referrer"
+                    />
                     <div>
                       <div className="flex items-center gap-1.5">
                         <span className="font-black text-base sm:text-lg tracking-tight leading-none">
@@ -241,42 +267,59 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
 
             {/* Desktop Navigation Links */}
             <nav className="hidden lg:flex items-center gap-1 text-sm font-medium">
-              {[
-                { id: 'rules', label: 'Правила и знаки' },
-                { id: 'tests', label: 'Тесты и экзамен' },
-                { id: 'materials', label: 'Полезные материалы' },
-                { id: 'lessons', label: 'Пройденные занятия' },
-                { id: 'schedule', label: 'Расписание' },
-              ].map((item) => {
-                const hasAccess = canAccessTab(item.id);
-                const isActive = activeTab === item.id;
+              {[...navTabs]
+                .filter((t) => t.isVisible)
+                .sort((a, b) => a.order - b.order)
+                .map((item) => {
+                  const hasAccess = canAccessTab(item.id);
+                  const isActive = activeTab === item.id;
 
-                return (
-                  <button
-                    key={item.id}
-                    onClick={() => {
-                      if (hasAccess) {
-                        setActiveTab(item.id);
-                      } else {
-                        alert(
-                          `Доступ к разделу "${item.label}" ограничен администратором для вашей учётной записи.`
-                        );
-                      }
-                    }}
-                    className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
-                      !hasAccess
-                        ? 'text-neutral-400 opacity-60 hover:bg-neutral-100/50 cursor-not-allowed'
-                        : isActive
-                        ? 'bg-neutral-100 text-neutral-900 font-semibold'
-                        : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50'
-                    }`}
-                    title={!hasAccess ? 'Доступ ограничен администратором' : undefined}
-                  >
-                    <span>{item.label}</span>
-                    {!hasAccess && <Lock className="w-3 h-3 text-neutral-400 shrink-0" />}
-                  </button>
-                );
-              })}
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => {
+                        if (hasAccess) {
+                          setActiveTab(item.id);
+                        } else {
+                          alert(
+                            `Доступ к разделу "${item.label}" ограничен администратором для вашей учётной записи.`
+                          );
+                        }
+                      }}
+                      className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
+                        !hasAccess
+                          ? 'text-neutral-400 opacity-60 hover:bg-neutral-100/50 cursor-not-allowed'
+                          : isActive
+                          ? 'bg-neutral-100 text-neutral-900 font-semibold'
+                          : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50'
+                      }`}
+                      title={!hasAccess ? 'Доступ ограничен администратором' : undefined}
+                    >
+                      <span>{item.label}</span>
+                      {!hasAccess && <Lock className="w-3 h-3 text-neutral-400 shrink-0" />}
+                    </button>
+                  );
+                })}
+
+              {/* Profile Tab: Available when student is logged in, OR when administrator is logged in */}
+              {(isAdmin || (currentUser && Boolean(currentUser.name))) && (
+                <button
+                  onClick={() => setActiveTab('profile')}
+                  className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
+                    activeTab === 'profile'
+                      ? isAdmin
+                        ? 'bg-amber-100 text-amber-900 font-bold'
+                        : 'bg-blue-100 text-blue-900 font-bold'
+                      : isAdmin
+                      ? 'text-amber-800 hover:bg-amber-50 font-semibold'
+                      : 'text-blue-700 hover:bg-blue-50 font-semibold'
+                  }`}
+                  title={isAdmin ? 'Кабинет администратора' : 'Личный кабинет курсанта'}
+                >
+                  <UserIcon className="w-3.5 h-3.5" />
+                  <span>Профиль</span>
+                </button>
+              )}
 
               {/* Statistics is visible ONLY for Admin */}
               {isAdmin && (
@@ -289,7 +332,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
                   }`}
                 >
                   <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>Ведомость (Статистика)</span>
+                  <span>Ведомость</span>
                 </button>
               )}
             </nav>
@@ -328,29 +371,42 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
                 ))}
               </div>
 
-              {/* User / Admin pill button */}
+              {/* User / Admin pill button - Opens Auth Modal for login / switch / logout */}
               <button
                 onClick={() => setIsAuthOpen(true)}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-medium transition-all ${
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-medium transition-all cursor-pointer ${
                   isAdmin
                     ? 'border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100'
-                    : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50'
+                    : currentUser && currentUser.name
+                    ? 'border-blue-300 bg-blue-50 text-blue-900 font-semibold hover:bg-blue-100'
+                    : 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700 shadow-xs'
                 }`}
-                title={isAdmin ? `Администратор (${adminCredentials.login})` : 'Профиль курсанта'}
+                title={
+                  isAdmin
+                    ? `Администратор (${adminCredentials.login}) — кликните для управления доступом`
+                    : currentUser && currentUser.name
+                    ? `Курсант: ${currentUser.name} — кликните для выхода или смены`
+                    : 'Вход в систему ДОСААФ (Курсант / Администратор)'
+                }
               >
                 {isAdmin ? (
                   <>
                     <ShieldCheck className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                     <span className="font-semibold hidden xs:inline">Админ ({adminCredentials.login})</span>
                   </>
-                ) : (
+                ) : currentUser && currentUser.name ? (
                   <>
                     <div className="w-4 h-4 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold shrink-0">
-                      {currentUser?.name?.charAt(0).toUpperCase() || 'У'}
+                      {currentUser.name.charAt(0).toUpperCase()}
                     </div>
-                    <span className="truncate max-w-[80px] sm:max-w-[110px]">
-                      {currentUser?.name || 'Указать ФИО'}
+                    <span className="truncate max-w-[80px] sm:max-w-[110px] font-semibold">
+                      {currentUser.name}
                     </span>
+                  </>
+                ) : (
+                  <>
+                    <UserIcon className="w-3.5 h-3.5 shrink-0" />
+                    <span className="font-bold">Войти</span>
                   </>
                 )}
               </button>
@@ -377,6 +433,12 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
       <StudentManagementModal
         isOpen={isStudentModalOpen}
         onClose={() => setIsStudentModalOpen(false)}
+      />
+
+      {/* Navigation Tabs Order & Rename Modal */}
+      <NavTabsEditorModal
+        isOpen={isNavTabsModalOpen}
+        onClose={() => setIsNavTabsModalOpen(false)}
       />
     </>
   );

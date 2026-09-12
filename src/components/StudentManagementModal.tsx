@@ -46,8 +46,6 @@ export const StudentManagementModal: React.FC<StudentManagementModalProps> = ({
     getGroupName,
     adminCredentials,
     updateAdminCredentials,
-    addRecoveryEmail,
-    removeRecoveryEmail,
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<'students' | 'security'>(defaultTab);
@@ -88,11 +86,6 @@ export const StudentManagementModal: React.FC<StudentManagementModalProps> = ({
   const [showAdminPassFields, setShowAdminPassFields] = useState(false);
   const [securityError, setSecurityError] = useState<string | null>(null);
   const [securitySuccess, setSecuritySuccess] = useState<string | null>(null);
-
-  // Add recovery email
-  const [newRecoveryEmail, setNewRecoveryEmail] = useState('');
-  const [emailError, setEmailError] = useState<string | null>(null);
-  const [emailSuccess, setEmailSuccess] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -251,20 +244,6 @@ export const StudentManagementModal: React.FC<StudentManagementModalProps> = ({
     }
   };
 
-  const handleAddRecoveryEmail = (e: React.FormEvent) => {
-    e.preventDefault();
-    setEmailError(null);
-    setEmailSuccess(null);
-
-    const res = addRecoveryEmail(newRecoveryEmail.trim());
-    if (res.success) {
-      setEmailSuccess(`Резервная почта ${newRecoveryEmail.trim()} успешно привязана!`);
-      setNewRecoveryEmail('');
-    } else {
-      setEmailError(res.error || 'Ошибка при добавлении почты');
-    }
-  };
-
   // Filtered students
   const filteredStudents = students.filter((s) => {
     const matchSearch =
@@ -281,9 +260,12 @@ export const StudentManagementModal: React.FC<StudentManagementModalProps> = ({
         {/* Modal Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-100 bg-neutral-900 text-white">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-amber-500 text-neutral-950 flex items-center justify-center font-black">
-              <Shield className="w-5 h-5" />
-            </div>
+            <img
+              src="/favicon.jpeg"
+              alt="ДОСААФ"
+              className="w-10 h-10 rounded-full object-contain bg-white shadow-xs shrink-0 ring-1 ring-neutral-700"
+              referrerPolicy="no-referrer"
+            />
             <div>
               <h2 className="text-base sm:text-lg font-bold">
                 Управление курсантами и безопасность автошколы
@@ -955,87 +937,6 @@ export const StudentManagementModal: React.FC<StudentManagementModalProps> = ({
                       Обновить учетные данные
                     </button>
                   </div>
-                </form>
-              </div>
-
-              {/* Recovery Emails Section */}
-              <div className="bg-neutral-50 p-5 sm:p-6 rounded-2xl border border-neutral-200 space-y-4">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold">
-                    <Mail className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-neutral-900">
-                      Резервная почта для восстановления доступа
-                    </h3>
-                    <p className="text-xs text-neutral-500">
-                      При сбросе забытого пароля проверочный код направляется на одну из подтвержденных почт
-                    </p>
-                  </div>
-                </div>
-
-                {emailError && (
-                  <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl">
-                    {emailError}
-                  </div>
-                )}
-                {emailSuccess && (
-                  <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl flex items-center gap-2">
-                    <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <span>{emailSuccess}</span>
-                  </div>
-                )}
-
-                {/* List of recovery emails */}
-                <div className="space-y-2 max-w-lg">
-                  {adminCredentials.recoveryEmails.map((email, idx) => (
-                    <div
-                      key={email}
-                      className="flex items-center justify-between p-3 bg-white rounded-xl border border-neutral-200 text-xs"
-                    >
-                      <div className="flex items-center gap-2.5">
-                        <Mail className="w-4 h-4 text-neutral-400" />
-                        <div>
-                          <span className="font-semibold text-neutral-900">{email}</span>
-                          {idx === 0 && (
-                            <span className="ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-800">
-                              Основная
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      {adminCredentials.recoveryEmails.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => removeRecoveryEmail(email)}
-                          className="text-neutral-400 hover:text-red-600 p-1"
-                          title="Удалить email"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-
-                {/* Add secondary email form */}
-                <form onSubmit={handleAddRecoveryEmail} className="flex items-center gap-2 max-w-lg pt-2">
-                  <input
-                    type="email"
-                    required
-                    value={newRecoveryEmail}
-                    onChange={(e) => setNewRecoveryEmail(e.target.value)}
-                    placeholder="Добавить вторую почту (например, admin2@dosaaf.ru)"
-                    className="flex-1 px-3.5 py-2 text-xs rounded-xl border border-neutral-300 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                  />
-                  <button
-                    type="submit"
-                    className="px-4 py-2 bg-neutral-900 hover:bg-neutral-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shrink-0"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Привязать</span>
-                  </button>
                 </form>
               </div>
             </div>

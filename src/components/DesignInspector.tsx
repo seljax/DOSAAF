@@ -183,35 +183,35 @@ export const DesignInspector: React.FC = () => {
         <button
           onClick={() => setIsCollapsed(false)}
           className="fixed top-20 left-4 z-50 bg-[#1e222d] text-white p-3 rounded-2xl shadow-2xl border border-neutral-700 hover:bg-[#282d3c] transition-all flex items-center gap-2 group cursor-pointer"
-          title="Развернуть панель Elementor"
+          title="Развернуть панель Редактора"
         >
-          <div className="w-6 h-6 rounded-lg bg-pink-600 text-white font-black flex items-center justify-center text-xs">
-            E
+          <div className="w-6 h-6 rounded-lg bg-sky-600 text-white font-black flex items-center justify-center text-xs">
+            Р
           </div>
           <span className="text-xs font-bold text-neutral-200 group-hover:text-white">
-            Панель Elementor
+            Редактор
           </span>
           <PanelLeftOpen className="w-4 h-4 text-neutral-400 group-hover:text-white" />
         </button>
       )}
 
-      {/* Main Elementor Docked Sidebar */}
+      {/* Main Docked Sidebar */}
       <div
         className={`fixed top-0 left-0 bottom-0 z-50 w-84 sm:w-96 bg-[#181b24] text-neutral-200 border-r border-neutral-800 shadow-2xl flex flex-col transition-transform duration-200 ease-in-out select-none ${
           isCollapsed ? '-translate-x-full' : 'translate-x-0'
         }`}
       >
-        {/* ELEMENTOR TOP BAR */}
+        {/* TOP BAR */}
         <div className="bg-[#12141b] px-4 py-3 border-b border-neutral-800 flex items-center justify-between gap-2 shrink-0">
           <div className="flex items-center gap-2.5">
-            {/* Elementor Iconic Emblem */}
-            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-pink-500 to-rose-600 text-white font-black flex items-center justify-center text-sm shadow-md">
-              E
+            {/* Editor Iconic Emblem */}
+            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-sky-500 to-blue-600 text-white font-black flex items-center justify-center text-sm shadow-md">
+              Р
             </div>
             <div>
               <div className="flex items-center gap-1.5">
                 <span className="text-xs font-black tracking-wider text-white uppercase">
-                  Elementor
+                  Редактор
                 </span>
                 <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30">
                   ВИЗУАЛЬНЫЙ

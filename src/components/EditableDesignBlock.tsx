@@ -29,6 +29,7 @@ interface EditableDesignBlockProps {
   className?: string;
   draggable?: boolean;
   allSiblingIds?: string[];
+  onClick?: (e: React.MouseEvent) => void;
   children:
     | React.ReactNode
     | ((props: {
@@ -52,6 +53,7 @@ export const EditableDesignBlock: React.FC<EditableDesignBlockProps> = ({
   className = '',
   draggable = false,
   allSiblingIds = [],
+  onClick,
   children,
 }) => {
   const { isAdmin } = useApp();
@@ -138,9 +140,14 @@ export const EditableDesignBlock: React.FC<EditableDesignBlockProps> = ({
   };
 
   const handleClick = (e: React.MouseEvent) => {
-    if (!activeDesignMode) return;
-    e.stopPropagation();
-    selectElement(id, containerId, label, sortItemId);
+    if (activeDesignMode) {
+      e.stopPropagation();
+      selectElement(id, containerId, label, sortItemId);
+      return;
+    }
+    if (onClick) {
+      onClick(e);
+    }
   };
 
   return (
