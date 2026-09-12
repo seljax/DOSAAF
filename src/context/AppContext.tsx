@@ -349,7 +349,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setCurrentUser(adminUser);
       return { success: true };
     }
-    return { success: false, error: 'Неверный логин или пароль администратора! Забыли чтоль?' };
+    return { success: false, error: 'Неверный логин или пароль администратора' };
   };
 
   const logout = () => {
