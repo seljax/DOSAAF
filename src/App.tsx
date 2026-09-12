@@ -9,6 +9,9 @@ import { MaterialsView } from './components/MaterialsView';
 import { StatisticsView } from './components/StatisticsView';
 import { CompletedLessonsView } from './components/CompletedLessonsView';
 import { ScheduleInfoView } from './components/ScheduleInfoView';
+import { StudentProfileView } from './components/StudentProfileView';
+import { ActivityLogsView } from './components/ActivityLogsView';
+import { Footer } from './components/Footer';
 import { DesignInspector } from './components/DesignInspector';
 import { AuthModal } from './components/AuthModal';
 import { StudentManagementModal } from './components/StudentManagementModal';
@@ -73,6 +76,17 @@ function AppContent() {
             {activeTab === 'stats' && <StatisticsView />}
             {activeTab === 'lessons' && <CompletedLessonsView />}
             {activeTab === 'schedule' && <ScheduleInfoView />}
+            {activeTab === 'profile' && (
+              <StudentProfileView
+                onOpenAuth={(tab) => {
+                  setAuthDefaultTab(tab || 'student');
+                  setAuthModalOpen(true);
+                }}
+                onNavigateToTab={(tab) => setActiveTab(tab)}
+                onOpenStudentModal={() => setStudentModalOpen(true)}
+              />
+            )}
+            {activeTab === 'logs' && <ActivityLogsView />}
           </>
         )}
       </main>
@@ -80,54 +94,15 @@ function AppContent() {
       {/* Floating Design Inspector for Admin */}
       <DesignInspector />
 
-      {/* Minimal Footer */}
-      <footer className="border-t border-neutral-200 bg-white py-6 hidden md:block">
-        <div className="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-neutral-500">
-          <div className="flex items-center gap-2 flex-wrap">
-            <Car className="w-4 h-4 text-blue-600" />
-            <span className="font-bold text-neutral-900">
-              ДОСААФ
-            </span>
-            <span className="text-neutral-300">•</span>
-            <span className="font-semibold text-neutral-700">
-              Категория B: {groups.map((g) => `${g.name} (${g.transmission})`).join(', ')}
-            </span>
-            <span className="text-neutral-300">•</span>
-            <span className="px-2 py-0.5 rounded-md bg-neutral-100 font-medium text-neutral-600 border border-neutral-200">
-              Создатель: SelJax
-            </span>
-          </div>
-
-          <div className="flex items-center gap-4">
-            {!isAdmin ? (
-              <button
-                onClick={() => {
-                  setAuthDefaultTab('admin');
-                  setAuthModalOpen(true);
-                }}
-                className="text-neutral-400 hover:text-amber-600 flex items-center gap-1 transition-colors"
-              >
-                <Lock className="w-3.5 h-3.5" />
-                <span>Вход для администратора</span>
-              </button>
-            ) : (
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => setStudentModalOpen(true)}
-                  className="text-xs text-sky-700 hover:text-sky-900 font-semibold flex items-center gap-1 hover:underline"
-                >
-                  <Users className="w-3.5 h-3.5" />
-                  <span>Управление курсантами</span>
-                </button>
-                <span className="text-amber-700 font-semibold flex items-center gap-1">
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>Администратор ({adminCredentials.login})</span>
-                </span>
-              </div>
-            )}
-          </div>
-        </div>
-      </footer>
+      {/* Full Customizable Footer with Email, Phone, Theme Switcher & Admin Controls */}
+      <Footer
+        onOpenAuth={(tab) => {
+          setAuthDefaultTab(tab);
+          setAuthModalOpen(true);
+        }}
+        onOpenStudentModal={() => setStudentModalOpen(true)}
+        onNavigateToTab={(tab) => setActiveTab(tab)}
+      />
 
       {/* Mobile Bottom Thumb Navigation */}
       <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} />

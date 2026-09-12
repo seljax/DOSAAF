@@ -1,1 +1,83 @@
 @import "tailwindcss";
+
+:root[data-theme="dark"] body,
+body.dark {
+  background-color: #0f172a;
+  color: #f1f5f9;
+}
+
+:root[data-theme="dark"] .bg-white {
+  background-color: #1e293b !important;
+  color: #f8fafc !important;
+  border-color: #334155 !important;
+}
+
+:root[data-theme="dark"] .bg-neutral-50 {
+  background-color: #0f172a !important;
+}
+
+:root[data-theme="dark"] .border-neutral-200 {
+  border-color: #334155 !important;
+}
+
+:root[data-theme="dark"] .text-neutral-900 {
+  color: #f8fafc !important;
+}
+
+:root[data-theme="dark"] .text-neutral-700 {
+  color: #cbd5e1 !important;
+}
+
+:root[data-theme="dark"] .text-neutral-600 {
+  color: #94a3b8 !important;
+}
+
+:root[data-theme="dark"] .text-neutral-500 {
+  color: #94a3b8 !important;
+}
+
+:root[data-theme="dark"] .bg-neutral-100 {
+  background-color: #334155 !important;
+  color: #f1f5f9 !important;
+}
+
+/* DOSAAF Navy Military Theme */
+:root[data-theme="dosaaf_navy"] body {
+  background-color: #070d1e;
+  color: #e2e8f0;
+}
+
+:root[data-theme="dosaaf_navy"] .bg-white {
+  background-color: #0e1b38 !important;
+  color: #f8fafc !important;
+  border-color: #1d3557 !important;
+}
+
+:root[data-theme="dosaaf_navy"] .bg-neutral-50 {
+  background-color: #070d1e !important;
+}
+
+:root[data-theme="dosaaf_navy"] .border-neutral-200 {
+  border-color: #1d3557 !important;
+}
+
+:root[data-theme="dosaaf_navy"] .text-neutral-900 {
+  color: #f8fafc !important;
+}
+
+:root[data-theme="dosaaf_navy"] .text-neutral-700 {
+  color: #cbd5e1 !important;
+}
+
+:root[data-theme="dosaaf_navy"] .text-neutral-600 {
+  color: #94a3b8 !important;
+}
+
+:root[data-theme="dosaaf_navy"] .text-neutral-500 {
+  color: #60a5fa !important;
+}
+
+:root[data-theme="dosaaf_navy"] .bg-neutral-100 {
+  background-color: #13274f !important;
+  color: #f1f5f9 !important;
+}

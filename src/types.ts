@@ -336,4 +336,4 @@ export interface SiteInfoSettings {
 }
 
 // Global Application Color Theme
-export type AppTheme = 'light' | 'dark' | 'dosaaf_navy';
+export type AppTheme = 'light' | 'dosaaf_navy';
