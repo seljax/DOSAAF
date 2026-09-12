@@ -22,38 +22,53 @@ interface DesignEditorContextType {
   isPreviewMode: boolean;
   setIsPreviewMode: (active: boolean) => void;
   togglePreviewMode: () => void;
-  
+
   selectedElementId: string | null;
   selectedContainerId: string | null;
   selectedElementLabel: string | null;
   selectedSortItemId: string | null;
-  selectElement: (id: string | null, containerId?: string | null, label?: string | null, sortItemId?: string | null) => void;
-  
+  selectElement: (
+    id: string | null,
+    containerId?: string | null,
+    label?: string | null,
+    sortItemId?: string | null
+  ) => void;
+
   draggedItemId: string | null;
   setDraggedItemId: (id: string | null) => void;
   activePageKey: string;
   setActivePageKey: (key: string) => void;
-  
+
   // Element queries & modifications
   getElementStyle: (elementId: string) => LiveElementStyle;
   getElementContent: (elementId: string) => LiveElementContent;
   setElementStyle: (elementId: string, style: Partial<LiveElementStyle>) => void;
   setElementContent: (elementId: string, content: Partial<LiveElementContent>) => void;
   toggleElementVisibility: (elementId: string) => void;
-  
+
   // Container item order management & mouse drag-drop
   getOrderedItems: <T extends { id: string }>(containerId: string, defaultItems: T[]) => T[];
-  reorderContainerByMouse: (containerId: string, sourceId: string, targetId: string, allItemIds?: string[]) => void;
-  moveItemInContainer: (containerId: string, itemId: string, direction: 'up' | 'down' | 'start' | 'end', allItemIds: string[]) => void;
+  reorderContainerByMouse: (
+    containerId: string,
+    sourceId: string,
+    targetId: string,
+    allItemIds?: string[]
+  ) => void;
+  moveItemInContainer: (
+    containerId: string,
+    itemId: string,
+    direction: 'up' | 'down' | 'start' | 'end',
+    allItemIds: string[]
+  ) => void;
   getContainerOrder: (containerId: string) => string[] | undefined;
-  
+
   // Persistence & Reset
   hasUnsavedChanges: boolean;
   saveAllDesigns: () => void;
   resetElement: (elementId: string) => void;
   resetCurrentPage: (pageKey: string) => void;
   resetAllDesigns: () => void;
-  
+
   // Helpers for class calculations
   computeElementClasses: (
     elementId: string,
@@ -98,7 +113,11 @@ export const DesignEditorProvider: React.FC<{ children: React.ReactNode }> = ({ 
       const savedV3 = localStorage.getItem(STORAGE_KEY);
       if (savedV3) {
         const parsed = JSON.parse(savedV3);
-        if (parsed && typeof parsed.styles === 'object' && typeof parsed.containerOrders === 'object') {
+        if (
+          parsed &&
+          typeof parsed.styles === 'object' &&
+          typeof parsed.containerOrders === 'object'
+        ) {
           return parsed;
         }
       }
@@ -114,7 +133,8 @@ export const DesignEditorProvider: React.FC<{ children: React.ReactNode }> = ({ 
         for (const key of Object.keys(legacy)) {
           if (legacy[key]?.styles) Object.assign(aggregatedStyles, legacy[key].styles);
           if (legacy[key]?.contents) Object.assign(aggregatedContents, legacy[key].contents);
-          if (legacy[key]?.containerOrders) Object.assign(aggregatedOrders, legacy[key].containerOrders);
+          if (legacy[key]?.containerOrders)
+            Object.assign(aggregatedOrders, legacy[key].containerOrders);
         }
 
         return {
@@ -133,13 +153,42 @@ export const DesignEditorProvider: React.FC<{ children: React.ReactNode }> = ({ 
     };
   });
 
-  // Save helper
+  // Save helper with /api/data persistence
   const persistState = useCallback((stateToSave: LiveAppDesignState) => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToSave));
+      fetch('/api/data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          key: 'live_app_designs',
+          value: stateToSave,
+        }),
+      }).catch((e) => console.warn('Failed to save designs to /api/data:', e));
     } catch (e) {
       console.error('Failed to save live designs to storage:', e);
     }
+  }, []);
+
+  // Sync designs from backend /api/data on mount
+  useEffect(() => {
+    fetch('/api/data')
+      .then((res) => res.json())
+      .then((response) => {
+        // Сервер возвращает { success: true, data: { live_app_designs: {...} } }
+        // Но также может вернуть { live_app_designs: {...} } — учитываем оба формата
+        const serverData = response?.data || response;
+        if (serverData && serverData.live_app_designs) {
+          setDesigns(serverData.live_app_designs);
+          // Обновляем и localStorage — на случай оффлайна
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(serverData.live_app_designs));
+          } catch {}
+        }
+      })
+      .catch((err) => {
+        console.warn('Could not fetch designs from /api/data:', err);
+      });
   }, []);
 
   const saveAllDesigns = useCallback(() => {
@@ -185,7 +234,12 @@ export const DesignEditorProvider: React.FC<{ children: React.ReactNode }> = ({ 
   }, []);
 
   const selectElement = useCallback(
-    (id: string | null, containerId?: string | null, label?: string | null, sortItemId?: string | null) => {
+    (
+      id: string | null,
+      containerId?: string | null,
+      label?: string | null,
+      sortItemId?: string | null
+    ) => {
       if (!isDesignMode) return;
       setSelectedElementId(id);
       setSelectedContainerId(containerId || null);
@@ -487,17 +541,20 @@ export const DesignEditorProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const resetAllDesigns = useCallback(() => {
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(LEGACY_STORAGE_KEY);
-    setDesigns({
+    const emptyState = {
       styles: {},
       contents: {},
       containerOrders: {},
-    });
+    };
+    setDesigns(emptyState);
+    // Сохраняем пустое состояние и на сервере
+    persistState(emptyState);
     setSelectedElementId(null);
     setSelectedContainerId(null);
     setSelectedElementLabel(null);
     setSelectedSortItemId(null);
     setHasUnsavedChanges(false);
-  }, []);
+  }, [persistState]);
 
   // Compute Tailwind classes according to customized styles
   const computeElementClasses = useCallback(
