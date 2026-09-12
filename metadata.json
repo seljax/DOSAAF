@@ -1,0 +1,6 @@
+{
+  "name": "ДОСААФ",
+  "description": "Автошкола ДОСААФ: Категория B (ПДД 2026, дорожные знаки, интерактивные тесты и комплексный экзамен, учебные группы, архив занятий и расписание). Создатель: SelJax",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
