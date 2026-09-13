@@ -45,6 +45,8 @@
 | **Сборка бэкенда** | esbuild, tsx |
 | **AI** | Google Gemini API (`@google/genai`) |
 
+Скриншот страницы: https://github.com/seljax/DOSAAF/blob/main/image_real.png
+
 ---
 
 ## 🚀 Запуск проекта
