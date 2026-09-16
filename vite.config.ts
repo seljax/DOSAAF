@@ -15,12 +15,7 @@ function aistudioMediaPlugin(): Plugin {
           try {
             const decodedPath = decodeURIComponent(rawPath);
             const relativePath = decodedPath.replace(/^\//, '');
-            const aistudioDir = path.resolve(
-              __dirname,
-              'public',
-              'assets',
-              'aistudio',
-            );
+            const aistudioDir = path.resolve(__dirname, 'public', 'assets', 'aistudio');
             const filePath = path.resolve(__dirname, 'public', relativePath);
             if (
               filePath.startsWith(aistudioDir + path.sep) &&
@@ -45,16 +40,13 @@ function aistudioMediaPlugin(): Plugin {
                 '.ogg': 'audio/ogg',
                 '.pdf': 'application/pdf',
               };
-              res.setHeader(
-                'Content-Type',
-                mimeMap[ext] || 'application/octet-stream',
-              );
+              res.setHeader('Content-Type', mimeMap[ext] || 'application/octet-stream');
               res.setHeader('Cache-Control', 'no-cache');
               fs.createReadStream(filePath).pipe(res);
               return;
             }
           } catch {
-            // Fall through if URI decoding or file access fails
+            // Fall through
           }
         }
         next();
@@ -77,12 +69,7 @@ export default defineConfig(() => {
       host: '0.0.0.0',
       hmr: process.env.DISABLE_HMR !== 'true',
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
-      proxy: {
-        '/api': {
-          target: 'http://localhost:3001',
-          changeOrigin: true,
-        },
-      },
+      // proxy не нужен — Vite работает как middleware внутри Express
     },
   };
 });
