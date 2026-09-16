@@ -3,14 +3,14 @@ import {
   User, RoadSign, RoadRule, QuestionCategory, Question, CompletedLesson,
   ScheduleItem, TestAttempt, GroupType, GroupConfig, LearningMaterial,
   ExamSettings, StudentAccount, AdminCredentials, ActivityLog,
-  FooterSettings, NavTabConfig, SiteInfoSettings, AppTheme,
+  FooterSettings, NavTabConfig, SiteInfoSettings, AppTheme, AccessRequest,
 } from '../types';
 import {
   INITIAL_SIGNS, INITIAL_RULES, INITIAL_CATEGORIES, INITIAL_QUESTIONS,
   INITIAL_LESSONS, INITIAL_SCHEDULE, INITIAL_ATTEMPTS, INITIAL_GROUPS,
   INITIAL_MATERIALS, INITIAL_EXAM_SETTINGS, INITIAL_STUDENTS,
   INITIAL_ADMIN_CREDENTIALS, INITIAL_ACTIVITY_LOGS, INITIAL_FOOTER_SETTINGS,
-  INITIAL_NAV_TABS, INITIAL_SITE_INFO,
+  INITIAL_NAV_TABS, INITIAL_SITE_INFO, INITIAL_ACCESS_REQUESTS,
 } from '../data/initialData';
 
 // ==================== API-ХРАНИЛИЩЕ ====================
@@ -145,6 +145,10 @@ interface AppContextType {
   addQuestion: (q: Omit<Question, 'id'>) => void;
   updateQuestion: (id: string, q: Partial<Question>) => void;
   deleteQuestion: (id: string) => void;
+  toggleQuestionExamInclusion: (id: string, include?: boolean) => void;
+  batchSetQuestionsExamInclusion: (questionIds: string[], include: boolean) => void;
+  isExamInProgress: boolean;
+  setIsExamInProgress: (inProgress: boolean) => void;
   lessons: CompletedLesson[];
   addLesson: (lesson: Omit<CompletedLesson, 'id' | 'createdAt'>) => void;
   updateLesson: (id: string, lesson: Partial<CompletedLesson>) => void;
@@ -166,6 +170,12 @@ interface AppContextType {
   resetToDefaults: () => void;
   exportDataJson: () => string;
   importDataJson: (json: string) => { success: boolean; error?: string };
+  // Заявки на доступ
+  accessRequests: AccessRequest[];
+  submitAccessRequest: (reqData: { firstName: string; lastName: string; password: string; group?: string }) => AccessRequest;
+  approveAccessRequest: (requestId: string) => { success: boolean; login?: string; error?: string };
+  rejectAccessRequest: (requestId: string) => void;
+  deleteAccessRequest: (requestId: string) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -185,14 +195,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     try {
       const saved = localStorage.getItem('avtoshkola_currentUser_v2');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && (parsed.isAdmin || (parsed.name && parsed.name.trim() !== ''))) {
+          return parsed;
+        }
+      }
     } catch {}
-    return {
-      id: 'student-demo',
-      name: '',
-      group: 'group7_mkpp',
-      isAdmin: false,
-    };
+    return null;
   });
 
   useEffect(() => {
@@ -235,6 +245,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [navTabs, setNavTabs] = useSyncedState<NavTabConfig[]>('navTabs', INITIAL_NAV_TABS, serverData);
   const [siteInfo, setSiteInfo] = useSyncedState<SiteInfoSettings>('siteInfo', INITIAL_SITE_INFO, serverData);
   const [appTheme, setAppThemeState] = useSyncedState<AppTheme>('appTheme', 'light', serverData);
+  const [accessRequests, setAccessRequests] = useSyncedState<AccessRequest[]>('access_requests', INITIAL_ACCESS_REQUESTS, serverData);
 
   // Password reset session (только в памяти)
   const [passwordResetSession, setPasswordResetSession] = useState<{
@@ -579,12 +590,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const resetSiteInfo = () => setSiteInfo(INITIAL_SITE_INFO);
 
   const logout = () => {
-    setCurrentUser({
-      id: `guest-${Date.now()}`,
-      name: '',
-      group: groups[0]?.id || 'group7_mkpp',
-      isAdmin: false,
-    });
+    setCurrentUser(null);
+    localStorage.removeItem('avtoshkola_currentUser_v2');
   };
 
   const addGroup = (newGroupData: Omit<GroupConfig, 'id'>) => {
@@ -667,6 +674,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const updateQuestion = (id: string, updates: Partial<Question>) =>
     setQuestions((prev) => prev.map((q) => (q.id === id ? { ...q, ...updates } : q)));
   const deleteQuestion = (id: string) => setQuestions((prev) => prev.filter((q) => q.id !== id));
+
+  const [isExamInProgress, setIsExamInProgress] = useState<boolean>(false);
+
+  const toggleQuestionExamInclusion = (id: string, include?: boolean) => {
+    setQuestions((prev) =>
+      prev.map((q) => {
+        if (q.id !== id) return q;
+        const newStatus = include !== undefined ? include : (q.includeInExam === false ? true : false);
+        return { ...q, includeInExam: newStatus };
+      })
+    );
+  };
+
+  const batchSetQuestionsExamInclusion = (questionIds: string[], include: boolean) => {
+    const idSet = new Set(questionIds);
+    setQuestions((prev) =>
+      prev.map((q) => {
+        if (!idSet.has(q.id)) return q;
+        return { ...q, includeInExam: include };
+      })
+    );
+  };
 
   const addLesson = (lesson: Omit<CompletedLesson, 'id' | 'createdAt'>) =>
     setLessons((prev) => [{ ...lesson, id: `lesson-${Date.now()}`, createdAt: Date.now() }, ...prev]);
@@ -769,6 +798,139 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  // ========== ЗАЯВКИ НА ДОСТУП ==========
+
+  const submitAccessRequest = (reqData: {
+    firstName: string;
+    lastName: string;
+    password: string;
+    group?: string;
+  }): AccessRequest => {
+    const cleanFirst = reqData.firstName.trim();
+    const cleanLast = reqData.lastName.trim();
+    const cleanPass = reqData.password.trim();
+    const targetGroup = reqData.group || groups[0]?.id || 'group7_mkpp';
+
+    const newReq: AccessRequest = {
+      id: `req_${Date.now()}_${Math.floor(100 + Math.random() * 900)}`,
+      firstName: cleanFirst,
+      lastName: cleanLast,
+      password: cleanPass,
+      group: targetGroup,
+      status: 'pending',
+      createdAt: Date.now(),
+    };
+
+    setAccessRequests((prev) => [newReq, ...prev]);
+
+    addActivityLog({
+      userId: newReq.id,
+      userName: `${cleanLast} ${cleanFirst}`.trim(),
+      userGroup: targetGroup,
+      userRole: 'student',
+      actionType: 'access_changed',
+      message: `Подана заявка на доступ: ${cleanLast} ${cleanFirst}`,
+      details: `Группа: ${getGroupName(targetGroup)}`,
+    });
+
+    return newReq;
+  };
+
+  const approveAccessRequest = (
+    requestId: string
+  ): { success: boolean; login?: string; error?: string } => {
+    const target = accessRequests.find((r) => r.id === requestId);
+    if (!target) return { success: false, error: 'Заявка не найдена' };
+    if (target.status === 'approved') return { success: false, error: 'Заявка уже одобрена' };
+
+    // Генерируем уникальный логин kursant_XXXX
+    let generatedLogin = '';
+    for (let attempts = 0; attempts < 100; attempts++) {
+      const candidate = `kursant_${Math.floor(1000 + Math.random() * 9000)}`;
+      if (!students.some((s) => s.login.toLowerCase() === candidate.toLowerCase())) {
+        generatedLogin = candidate;
+        break;
+      }
+    }
+    if (!generatedLogin) {
+      generatedLogin = `kursant_${Date.now().toString().slice(-4)}`;
+    }
+
+    // Создаём учетную запись курсанта
+    const targetGroup = target.group || groups[0]?.id || 'group7_mkpp';
+    const newStudent = addStudent({
+      firstName: target.firstName,
+      lastName: target.lastName,
+      fullName: `${target.lastName} ${target.firstName}`.trim(),
+      login: generatedLogin,
+      password: target.password,
+      group: targetGroup,
+      status: 'active',
+      allowedTabs: {
+        rules: true,
+        materials: true,
+        lessons: true,
+        schedule: true,
+      },
+      canTakeTests: true,
+      canTakeExam: false,
+      notes: `Заявка одобрена администратором ${new Date().toLocaleDateString('ru-RU')}`,
+    });
+
+    // Помечаем заявку как approved с логином
+    setAccessRequests((prev) =>
+      prev.map((r) =>
+        r.id === requestId
+          ? {
+              ...r,
+              status: 'approved' as const,
+              approvedLogin: generatedLogin,
+              processedAt: Date.now(),
+            }
+          : r
+      )
+    );
+
+    addActivityLog({
+      userId: newStudent.id,
+      userName: newStudent.fullName,
+      userGroup: newStudent.group,
+      userRole: 'admin',
+      actionType: 'access_changed',
+      message: `Одобрена заявка на доступ: ${target.lastName} ${target.firstName}`,
+      details: `Выдан логин: ${generatedLogin}, группа: ${getGroupName(targetGroup)}`,
+    });
+
+    return { success: true, login: generatedLogin };
+  };
+
+  const rejectAccessRequest = (requestId: string) => {
+    const target = accessRequests.find((r) => r.id === requestId);
+    setAccessRequests((prev) =>
+      prev.map((r) =>
+        r.id === requestId
+          ? { ...r, status: 'rejected' as const, processedAt: Date.now() }
+          : r
+      )
+    );
+
+    if (target) {
+      addActivityLog({
+        userId: target.id,
+        userName: `${target.lastName} ${target.firstName}`.trim(),
+        userGroup: target.group || 'all',
+        userRole: 'admin',
+        actionType: 'access_changed',
+        message: `Отклонена заявка на доступ: ${target.lastName} ${target.firstName}`,
+        details: 'Заявка отклонена администратором',
+      });
+    }
+  };
+
+  const deleteAccessRequest = (requestId: string) => {
+    setAccessRequests((prev) => prev.filter((r) => r.id !== requestId));
+  };
+
   return (
     <AppContext.Provider
       value={{
@@ -835,6 +997,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addQuestion,
         updateQuestion,
         deleteQuestion,
+        toggleQuestionExamInclusion,
+        batchSetQuestionsExamInclusion,
+        isExamInProgress,
+        setIsExamInProgress,
         lessons,
         addLesson,
         updateLesson,
@@ -856,6 +1022,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         resetToDefaults,
         exportDataJson,
         importDataJson,
+        accessRequests,
+        submitAccessRequest,
+        approveAccessRequest,
+        rejectAccessRequest,
+        deleteAccessRequest,
       }}
     >
       {children}

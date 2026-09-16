@@ -8,6 +8,7 @@ export const ThemeSwitcherBar: React.FC = () => {
 
   const themes: { id: AppTheme; label: string; icon: React.FC<{ className?: string }> }[] = [
     { id: 'light', label: 'Светлая', icon: Sun },
+    { id: 'dark', label: 'Тёмная', icon: Moon },
     { id: 'dosaaf_navy', label: 'Тёмно-синяя', icon: Shield },
   ];
 

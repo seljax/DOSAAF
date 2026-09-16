@@ -16,7 +16,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
     { id: 'rules', label: 'ПДД', icon: BookOpen },
     { id: 'tests', label: 'Тесты', icon: CheckSquare },
     { id: 'materials', label: 'Материалы', icon: Compass },
-    { id: 'lessons', label: 'Лекции', icon: GraduationCap },
+    { id: 'lessons', label: 'Занятия', icon: GraduationCap },
     isAdmin || isStudentLoggedIn
       ? { id: 'profile', label: 'Профиль', icon: UserIcon }
       : { id: 'schedule', label: 'График', icon: CalendarClock },

@@ -186,7 +186,7 @@ export const Footer: React.FC<FooterProps> = ({
               <div className="flex items-center gap-2 text-[11px] text-neutral-500">
                 <span>Версия портала:</span>
                 <span className="font-mono font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                  {siteInfo.version || 'v0.04'}
+                  {siteInfo.version || 'v0.06'}
                 </span>
               </div>
             </div>

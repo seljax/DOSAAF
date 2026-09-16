@@ -16,6 +16,7 @@ export const GroupSettingsModal: React.FC<GroupSettingsModalProps> = ({ isOpen, 
   const [newGroupNumber, setNewGroupNumber] = useState('');
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupTransmission, setNewGroupTransmission] = useState<'МКПП' | 'АКПП'>('МКПП');
+  const [newGroupCategory, setNewGroupCategory] = useState<'B' | 'C'>('B');
   const [newGroupDesc, setNewGroupDesc] = useState('');
 
   // Synchronize when opened
@@ -28,7 +29,7 @@ export const GroupSettingsModal: React.FC<GroupSettingsModalProps> = ({ isOpen, 
 
   if (!isOpen) return null;
 
-  const handleChange = (id: string, field: keyof GroupConfig, value: string) => {
+  const handleChange = (id: string, field: keyof GroupConfig, value: any) => {
     setLocalGroups((prev) =>
       prev.map((g) => {
         if (g.id !== id) return g;
@@ -49,6 +50,8 @@ export const GroupSettingsModal: React.FC<GroupSettingsModalProps> = ({ isOpen, 
       name,
       transmission: newGroupTransmission,
       transmissionLabel: label,
+      category: newGroupCategory,
+      categoryLabel: newGroupCategory === 'C' ? 'Грузовые автомобили (Кат. C)' : 'Легковые автомобили (Кат. B)',
       description: newGroupDesc.trim(),
     });
 
@@ -77,6 +80,9 @@ export const GroupSettingsModal: React.FC<GroupSettingsModalProps> = ({ isOpen, 
         name: g.name.trim() || `Группа №${g.number}`,
         transmission: g.transmission,
         transmissionLabel: g.transmissionLabel,
+        category: g.category || 'B',
+        categoryLabel: g.categoryLabel || (g.category === 'C' ? 'Грузовые автомобили (Кат. C)' : 'Легковые автомобили (Кат. B)'),
+        vehicles: g.vehicles,
         description: g.description,
       });
     });
@@ -209,6 +215,49 @@ export const GroupSettingsModal: React.FC<GroupSettingsModalProps> = ({ isOpen, 
                   </div>
                 </div>
 
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="font-semibold text-neutral-700 block mb-1">
+                      Категория ТС
+                    </label>
+                    <select
+                      value={group.category || 'B'}
+                      onChange={(e) => {
+                        const cat = e.target.value as 'B' | 'C';
+                        handleChange(group.id, 'category', cat);
+                        handleChange(
+                          group.id,
+                          'categoryLabel',
+                          cat === 'C' ? 'Грузовые автомобили (Кат. C)' : 'Легковые автомобили (Кат. B)'
+                        );
+                      }}
+                      className="w-full px-3 py-2 border rounded-xl bg-white text-xs font-semibold"
+                    >
+                      <option value="B">Категория «B» (Легковые)</option>
+                      <option value="C">Категория «C» (Грузовые)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="font-semibold text-neutral-700 block mb-1">
+                      Учебные автомобили
+                    </label>
+                    <input
+                      type="text"
+                      value={(group.vehicles || []).join(', ')}
+                      onChange={(e) =>
+                        handleChange(
+                          group.id,
+                          'vehicles',
+                          e.target.value.split(',').map((s) => s.trim()).filter(Boolean)
+                        )
+                      }
+                      placeholder="Lada Vesta, Renault Logan"
+                      className="w-full px-3 py-2 border rounded-xl bg-white text-xs"
+                    />
+                  </div>
+                </div>
+
                 <div>
                   <label className="font-semibold text-neutral-700 block mb-1">
                     Примечание / Описание группы
@@ -274,7 +323,18 @@ export const GroupSettingsModal: React.FC<GroupSettingsModalProps> = ({ isOpen, 
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="font-semibold text-neutral-700 block mb-1">Категория</label>
+                  <select
+                    value={newGroupCategory}
+                    onChange={(e) => setNewGroupCategory(e.target.value as 'B' | 'C')}
+                    className="w-full px-3 py-2 border rounded-xl bg-white text-xs font-semibold"
+                  >
+                    <option value="B">Кат. B (Легковые)</option>
+                    <option value="C">Кат. C (Грузовые)</option>
+                  </select>
+                </div>
                 <div>
                   <label className="font-semibold text-neutral-700 block mb-1">Трансмиссия</label>
                   <select
@@ -292,7 +352,7 @@ export const GroupSettingsModal: React.FC<GroupSettingsModalProps> = ({ isOpen, 
                     type="text"
                     value={newGroupDesc}
                     onChange={(e) => setNewGroupDesc(e.target.value)}
-                    placeholder="Например: Новая вечерняя группа"
+                    placeholder="Например: Новая группа"
                     className="w-full px-3 py-2 border rounded-xl bg-white text-xs"
                   />
                 </div>

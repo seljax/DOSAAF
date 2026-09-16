@@ -1,12 +1,16 @@
 export type GroupType = string;
+export type VehicleCategory = 'B' | 'C' | 'BC';
 
 export interface GroupConfig {
-  id: string; // e.g. "group7_mkpp", "group8_akpp", "group9_mkpp"
-  number: string; // e.g. "7", "8", "9"
+  id: string; // e.g. "group7_mkpp", "group8_akpp", "group3_c"
+  number: string; // e.g. "7", "8", "3"
   name: string; // e.g. "Группа №7"
+  category?: VehicleCategory; // 'B' | 'C' | 'BC'
+  categoryLabel?: string; // e.g. "Категория «B»", "Категория «C»"
   transmission: 'МКПП' | 'АКПП' | string;
   transmissionLabel: string; // e.g. "Механика (МКПП)"
   description?: string;
+  vehicles?: string; // e.g. "КамАЗ-4350, Урал-4320"
 }
 
 export interface StudentAccount {
@@ -29,6 +33,18 @@ export interface StudentAccount {
   notes?: string;
   createdAt: number;
   lastLoginAt?: number;
+}
+
+export interface AccessRequest {
+  id: string;
+  firstName: string;
+  lastName: string;
+  password: string;
+  group?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: number;
+  approvedLogin?: string;
+  processedAt?: number;
 }
 
 export interface AdminCredentials {
@@ -86,6 +102,7 @@ export interface RoadRule {
   content: string;
   keyPoints: string[];
   groupFocus?: 'all' | 'mkpp' | 'akpp';
+  categoryFocus?: 'all' | 'B' | 'C' | 'BC';
   imageUrl?: string;
 }
 
@@ -107,7 +124,9 @@ export interface Question {
   imageUrl?: string;
   signId?: string;
   groupTarget?: string; // 'all' or any group id
+  categoryType?: 'all' | 'B' | 'C' | 'BC'; // Target vehicle category
   difficulty?: 'easy' | 'medium' | 'hard';
+  includeInExam?: boolean; // whether this question is in the GIBDD/DOSAAF exam pool
 }
 
 export interface TestAttempt {
@@ -130,6 +149,15 @@ export interface TestAttempt {
   answeredCount?: number;
 }
 
+export interface LessonAttachment {
+  id: string;
+  name: string;
+  size?: string;
+  type: 'word' | 'excel' | 'image' | 'archive' | 'file';
+  extension: string; // doc, docx, xls, xlsx, png, jpg, zip, rar
+  url?: string;
+}
+
 export interface CompletedLesson {
   id: string;
   date: string; // e.g. "09.09.2026"
@@ -137,10 +165,12 @@ export interface CompletedLesson {
   group: GroupType;
   instructor: string;
   description: string;
-  fullLectureNotes?: string; // Detailed text for absent students
+  fullLectureNotes?: string; // Detailed text for absent students and remote learners
   keyPoints: string[];
   homework?: string;
   materials?: { title: string; url?: string }[];
+  attachments?: LessonAttachment[]; // Up to 16 files (word, excel, png, jpg, zip, rar)
+  isRemoteFriendly?: boolean;
   createdAt: number;
 }
 
@@ -298,6 +328,8 @@ export interface ActivityLog {
     | 'logout'
     | 'test_completed'
     | 'exam_completed'
+    | 'exam_started'
+    | 'exam_violation'
     | 'access_changed'
     | 'settings_updated';
   message: string;
@@ -336,4 +368,4 @@ export interface SiteInfoSettings {
 }
 
 // Global Application Color Theme
-export type AppTheme = 'light' | 'dosaaf_navy';
+export type AppTheme = 'light' | 'dark' | 'dosaaf_navy';

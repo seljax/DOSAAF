@@ -248,6 +248,58 @@ function renderSignVector(type: string, number: string) {
     );
   }
 
+  // 16. Движение грузовых автомобилей запрещено (3.4)
+  if (type === '3.4' || type === 'no_trucks') {
+    return (
+      <svg viewBox="0 0 100 100" className="w-full h-full">
+        <circle cx="50" cy="50" r="46" fill="#FFFFFF" stroke="#D32F2F" strokeWidth="9" />
+        {/* Truck Silhouette */}
+        {/* Cab */}
+        <path d="M62 44 L70 44 L75 52 L75 62 L62 62 Z" fill="#000000" />
+        {/* Window */}
+        <path d="M64 47 L69 47 L72 52 L64 52 Z" fill="#FFFFFF" />
+        {/* Cargo Body */}
+        <rect x="25" y="38" width="35" height="24" rx="1" fill="#000000" />
+        {/* Wheels */}
+        <circle cx="34" cy="64" r="5" fill="#000000" stroke="#FFFFFF" strokeWidth="1.5" />
+        <circle cx="48" cy="64" r="5" fill="#000000" stroke="#FFFFFF" strokeWidth="1.5" />
+        <circle cx="68" cy="64" r="5" fill="#000000" stroke="#FFFFFF" strokeWidth="1.5" />
+      </svg>
+    );
+  }
+
+  // 17. Движение с прицепом запрещено (3.7)
+  if (type === '3.7' || type === 'no_trailers') {
+    return (
+      <svg viewBox="0 0 100 100" className="w-full h-full">
+        <circle cx="50" cy="50" r="46" fill="#FFFFFF" stroke="#D32F2F" strokeWidth="9" />
+        {/* Trailer body */}
+        <rect x="30" y="42" width="38" height="20" rx="2" fill="#000000" />
+        {/* Drawbar / hitch */}
+        <line x1="68" y1="58" x2="80" y2="58" stroke="#000000" strokeWidth="3" />
+        {/* Trailer Wheels */}
+        <circle cx="40" cy="64" r="5" fill="#000000" stroke="#FFFFFF" strokeWidth="1.5" />
+        <circle cx="58" cy="64" r="5" fill="#000000" stroke="#FFFFFF" strokeWidth="1.5" />
+      </svg>
+    );
+  }
+
+  // 18. Вид транспортного средства: Грузовые авто (8.4.1)
+  if (type === '8.4.1' || type === 'plate_truck') {
+    return (
+      <svg viewBox="0 0 100 100" className="w-full h-full">
+        <rect x="8" y="24" width="84" height="52" rx="4" fill="#FFFFFF" stroke="#000000" strokeWidth="2.5" />
+        {/* Truck Silhouette */}
+        <path d="M60 38 L68 38 L73 45 L73 55 L60 55 Z" fill="#000000" />
+        <path d="M62 40 L67 40 L70 45 L62 45 Z" fill="#FFFFFF" />
+        <rect x="24" y="34" width="34" height="21" rx="1" fill="#000000" />
+        <circle cx="32" cy="57" r="4.5" fill="#000000" stroke="#FFFFFF" strokeWidth="1" />
+        <circle cx="45" cy="57" r="4.5" fill="#000000" stroke="#FFFFFF" strokeWidth="1" />
+        <circle cx="66" cy="57" r="4.5" fill="#000000" stroke="#FFFFFF" strokeWidth="1" />
+      </svg>
+    );
+  }
+
   // Generic fallback badge
   return (
     <div className="w-full h-full rounded-xl bg-neutral-900 border-2 border-neutral-700 text-white flex flex-col items-center justify-center p-1 text-center font-bold">

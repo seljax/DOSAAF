@@ -33,6 +33,14 @@ import {
   Timer,
   Sliders,
   UserCheck,
+  ShieldAlert,
+  ShieldCheck,
+  Check,
+  Minus,
+  Info,
+  Search,
+  Truck,
+  Car,
 } from 'lucide-react';
 
 interface ActiveTestSession {
@@ -68,11 +76,27 @@ export const TestsView: React.FC = () => {
     groups,
     canStudentTakeTests,
     canStudentTakeExam,
+    toggleQuestionExamInclusion,
+    batchSetQuestionsExamInclusion,
+    isExamInProgress,
+    setIsExamInProgress,
+    addActivityLog,
   } = useApp();
   const { getOrderedItems } = useDesignEditor();
 
   // Test Session state
   const [activeSession, setActiveSession] = useState<ActiveTestSession | null>(null);
+
+  // Pre-exam Warning & Instruction Modal state
+  const [isExamWarningOpen, setIsExamWarningOpen] = useState(false);
+  const [examAgreementChecked, setExamAgreementChecked] = useState(false);
+
+  // Anti-cheat tab tracking & violation alerts
+  const [tabViolationsCount, setTabViolationsCount] = useState(0);
+  const [showTabViolationAlert, setShowTabViolationAlert] = useState(false);
+
+  // Filter for question bank exam pool: 'all' | 'included' | 'excluded'
+  const [examInclusionFilter, setExamInclusionFilter] = useState<'all' | 'included' | 'excluded'>('all');
 
   // Admin Exam & Timer Settings Modal
   const [isExamSettingsOpen, setIsExamSettingsOpen] = useState(false);
@@ -97,9 +121,17 @@ export const TestsView: React.FC = () => {
     explanation: '',
     imageUrl: '',
     signId: '',
-    groupTarget: 'all' as 'all' | 'group7_mkpp' | 'group8_akpp',
+    groupTarget: 'all' as string,
     difficulty: 'medium' as 'easy' | 'medium' | 'hard',
+    includeInExam: true,
   });
+
+  // Admin Exam Questions Builder & Manager Modal
+  const [isExamQuestionsModalOpen, setIsExamQuestionsModalOpen] = useState(false);
+  const [examQSearch, setExamQSearch] = useState('');
+  const [examQCatFilter, setExamQCatFilter] = useState('all');
+  const [examQTargetFilter, setExamQTargetFilter] = useState<'all' | 'B' | 'C'>('all');
+  const [examQStatusFilter, setExamQStatusFilter] = useState<'all' | 'included' | 'excluded'>('all');
 
   // Keep local settings in sync with context
   useEffect(() => {
@@ -112,9 +144,62 @@ export const TestsView: React.FC = () => {
     activeSessionRef.current = activeSession;
   }, [activeSession]);
 
+  // Tab switching violation monitor during active state exam
+  useEffect(() => {
+    if (!activeSession || !activeSession.isExamMode || activeSession.isFinished) return;
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        setTabViolationsCount((prev) => {
+          const nextCount = prev + 1;
+          addActivityLog({
+            userId: currentUser?.id || 'guest',
+            userName: currentUser?.name || 'Курсант',
+            userGroup: currentUser?.group || groups[0]?.id || '',
+            userRole: currentUser?.isAdmin ? 'admin' : 'student',
+            actionType: 'exam_violation',
+            message: `⚠️ Нарушение режима экзамена: уход с вкладки или сворачивание окна (попытка #${nextCount})`,
+            details: `Вопрос ${(activeSessionRef.current?.currentIndex ?? 0) + 1} из ${activeSessionRef.current?.questionsList.length || 20}, прошло ${activeSessionRef.current?.elapsedSeconds || 0} сек.`,
+          });
+          return nextCount;
+        });
+        setShowTabViolationAlert(true);
+      }
+    };
+
+    const handleWindowBlur = () => {
+      if (document.hidden) return; // already handled by visibilitychange
+      setTabViolationsCount((prev) => {
+        const nextCount = prev + 1;
+        addActivityLog({
+          userId: currentUser?.id || 'guest',
+          userName: currentUser?.name || 'Курсант',
+          userGroup: currentUser?.group || groups[0]?.id || '',
+          userRole: currentUser?.isAdmin ? 'admin' : 'student',
+          actionType: 'exam_violation',
+          message: `⚠️ Нарушение режима экзамена: переключение на другое окно (попытка #${nextCount})`,
+          details: `Курсант переключил фокус с экзаменационного окна.`,
+        });
+        return nextCount;
+      });
+      setShowTabViolationAlert(true);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('blur', handleWindowBlur);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('blur', handleWindowBlur);
+    };
+  }, [activeSession?.isExamMode, activeSession?.isFinished, addActivityLog, currentUser, groups]);
+
   // Finish test callback
   const finishActiveTest = (sessionToFinish = activeSession) => {
     if (!sessionToFinish || sessionToFinish.isFinished) return;
+
+    if (sessionToFinish.isExamMode) {
+      setIsExamInProgress(false);
+    }
 
     let correctCount = 0;
     const wrongIds: string[] = [];
@@ -141,7 +226,7 @@ export const TestsView: React.FC = () => {
     recordTestAttempt({
       userId: currentUser?.id || 'guest',
       userName: currentUser?.name || 'Ученик',
-      userGroup: currentUser?.group || groups[0]?.id || 'group7_mkpp',
+      userGroup: currentUser?.group || groups[0]?.id || '',
       categoryId: sessionToFinish.category ? sessionToFinish.category.id : 'exam_mixed',
       categoryTitle: sessionToFinish.category
         ? sessionToFinish.category.title
@@ -198,7 +283,7 @@ export const TestsView: React.FC = () => {
     recordTestAttempt({
       userId: currentUser?.id || 'guest',
       userName: currentUser?.name || 'Ученик',
-      userGroup: currentUser?.group || groups[0]?.id || 'group7_mkpp',
+      userGroup: currentUser?.group || groups[0]?.id || '',
       categoryId: sessionToAbort.category ? sessionToAbort.category.id : 'exam_mixed',
       categoryTitle: sessionToAbort.category
         ? `${sessionToAbort.category.title} (Не закончен)`
@@ -213,6 +298,10 @@ export const TestsView: React.FC = () => {
       wrongQuestionIds: wrongIds,
       isExam: sessionToAbort.isExamMode,
     });
+
+    if (sessionToAbort.isExamMode) {
+      setIsExamInProgress(false);
+    }
 
     setActiveSession(null);
   };
@@ -257,11 +346,40 @@ export const TestsView: React.FC = () => {
   // Questions filtered by group preference if selected
   const availableQuestions = useMemo(() => {
     return questions.filter((q) => {
-      if (selectedGroupTab === 'group7_mkpp' && q.groupTarget === 'group8_akpp') return false;
-      if (selectedGroupTab === 'group8_akpp' && q.groupTarget === 'group7_mkpp') return false;
+      if (selectedGroupTab !== 'all' && q.groupTarget && q.groupTarget !== 'all' && q.groupTarget !== selectedGroupTab) {
+        return false;
+      }
       return true;
     });
   }, [questions, selectedGroupTab]);
+
+  // Filtered list of questions in the Exam Questions Builder modal
+  const filteredExamQuestions = useMemo(() => {
+    return questions.filter((q) => {
+      // Text Search
+      if (examQSearch.trim()) {
+        const needle = examQSearch.toLowerCase();
+        const textMatch = q.questionText.toLowerCase().includes(needle);
+        const optMatch = q.options.some((o) => o.toLowerCase().includes(needle));
+        if (!textMatch && !optMatch) return false;
+      }
+      // Category filter
+      if (examQCatFilter !== 'all' && q.categoryId !== examQCatFilter) {
+        return false;
+      }
+      // Target Filter (B / C / All)
+      if (examQTargetFilter === 'B') {
+        if (q.categoryType === 'C' || q.groupTarget === 'group3_c') return false;
+      } else if (examQTargetFilter === 'C') {
+        if (q.categoryType !== 'C' && q.groupTarget !== 'group3_c' && q.groupTarget !== 'all') return false;
+      }
+      // Status filter
+      if (examQStatusFilter === 'included' && q.includeInExam === false) return false;
+      if (examQStatusFilter === 'excluded' && q.includeInExam !== false) return false;
+
+      return true;
+    });
+  }, [questions, examQSearch, examQCatFilter, examQTargetFilter, examQStatusFilter]);
 
   // Start Test in Category
   const handleStartCategoryTest = (category: QuestionCategory) => {
@@ -292,7 +410,7 @@ export const TestsView: React.FC = () => {
     });
   };
 
-  // Start Exam Mode
+  // Trigger Exam Warning Modal
   const handleStartExam = () => {
     if (!examSettings.isOpen && !isAdmin) {
       alert('Общий доступ к экзамену пока закрыт преподавателем.');
@@ -304,14 +422,54 @@ export const TestsView: React.FC = () => {
       return;
     }
 
-    if (availableQuestions.length === 0) {
-      alert('Нет доступных вопросов для экзамена.');
+    const examCandidates = availableQuestions.filter((q) => q.includeInExam !== false);
+    if (examCandidates.length === 0) {
+      alert('В пуле государственного экзамена пока нет активных вопросов. Администратор может включить вопросы в экзамен в банке вопросов.');
       return;
     }
 
-    const qCount = Math.min(examSettings.questionCount || 20, availableQuestions.length);
-    const shuffled = [...availableQuestions].sort(() => 0.5 - Math.random()).slice(0, qCount);
+    setExamAgreementChecked(false);
+    setIsExamWarningOpen(true);
+  };
+
+  // Confirm and Start Exam Mode with anti-cheat lock
+  const handleConfirmStartExam = () => {
+    const examCandidates = availableQuestions.filter((q) => q.includeInExam !== false);
+    if (examCandidates.length === 0) {
+      alert('Нет доступных вопросов в пуле экзамена.');
+      return;
+    }
+
+    const qCount = Math.min(examSettings.questionCount || 20, examCandidates.length);
+    const shuffled = [...examCandidates].sort(() => 0.5 - Math.random()).slice(0, qCount);
     const limitSec = (examSettings.timeLimitMinutes || 20) * 60;
+
+    setIsExamWarningOpen(false);
+    setIsExamInProgress(true);
+    setTabViolationsCount(0);
+    setShowTabViolationAlert(false);
+
+    // Try requesting fullscreen to minimize distractions if supported
+    try {
+      if (document.documentElement && document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch(() => {
+          // Ignored if user browser blocks programmatic fullscreen
+        });
+      }
+    } catch {
+      // Ignored
+    }
+
+    // Log exam start to activity log
+    addActivityLog({
+      userId: currentUser?.id || 'guest',
+      userName: currentUser?.name || 'Курсант',
+      userGroup: currentUser?.group || groups[0]?.id || '',
+      userRole: currentUser?.isAdmin ? 'admin' : 'student',
+      actionType: 'exam_started',
+      message: `🏁 Начал(а) сдачу государственного экзамена ДОСААФ`,
+      details: `Билет сформирован из пула (${qCount} вопр.). Лимит: ${Math.round(limitSec / 60)} мин. Включен строгий режим анти-списывания.`,
+    });
 
     setActiveSession({
       category: null,
@@ -416,8 +574,8 @@ export const TestsView: React.FC = () => {
                 {isPass ? 'Тест успешно сдан!' : 'Экзамен не сдан. Требуется повторение'}
               </h2>
               <p className="text-xs text-neutral-500">
-                Курсант: <strong className="text-neutral-800">{currentUser?.name}</strong> •{' '}
-                {currentUser?.group === 'group7_mkpp' ? 'Группа №7' : 'Группа №8'}
+                Курсант: <strong className="text-neutral-800">{currentUser?.name || 'Курсант ДОСААФ'}</strong> •{' '}
+                <span className="font-semibold text-neutral-700">{getGroupName(currentUser?.group)}</span>
               </p>
             </div>
 
@@ -445,6 +603,15 @@ export const TestsView: React.FC = () => {
                 </span>
               </div>
             </div>
+
+            {activeSession.isExamMode && tabViolationsCount > 0 && (
+              <div className="p-3 bg-amber-50 rounded-2xl border border-amber-300 text-xs text-amber-950 flex items-center justify-center gap-2 max-w-md mx-auto font-medium">
+                <ShieldAlert className="w-4 h-4 text-amber-700 shrink-0" />
+                <span>
+                  Зафиксировано нарушений режима сдачи (уход с вкладки): <strong>{tabViolationsCount}</strong>. События переданы в протокол автошколы.
+                </span>
+              </div>
+            )}
 
             <p className="text-xs text-neutral-600 max-w-md mx-auto leading-relaxed">
               {isPass
@@ -480,7 +647,78 @@ export const TestsView: React.FC = () => {
 
     // Active Question Screen
     return (
-      <div className="max-w-3xl mx-auto space-y-4">
+      <div
+        className="max-w-3xl mx-auto space-y-4 exam-anti-copy test-anti-copy select-none"
+        onContextMenu={(e) => e.preventDefault()}
+        onCopy={(e) => e.preventDefault()}
+        onCut={(e) => e.preventDefault()}
+        onDragStart={(e) => e.preventDefault()}
+      >
+        {/* Anti-cheat Alert Modal for Tab Switching */}
+        {showTabViolationAlert && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs animate-in fade-in">
+            <div className="bg-white rounded-3xl max-w-md w-full p-6 text-center space-y-4 border-2 border-rose-500 shadow-2xl">
+              <div className="w-14 h-14 bg-rose-100 text-rose-600 rounded-2xl mx-auto flex items-center justify-center">
+                <ShieldAlert className="w-8 h-8" />
+              </div>
+              <div className="space-y-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-rose-600">
+                  Система прокторинга ДОСААФ
+                </span>
+                <h3 className="text-lg font-black text-rose-950">
+                  Зафиксирован уход с вкладки экзамена!
+                </h3>
+                <p className="text-xs text-neutral-600 leading-relaxed">
+                  Вы покинули окно государственного экзамена (попытка #{tabViolationsCount}).
+                  Данное событие зарегистрировано в журнале нарушений с указанием вашего аккаунта.
+                </p>
+              </div>
+
+              <div className="p-3.5 bg-rose-50 rounded-2xl border border-rose-200 text-xs text-rose-900 text-left font-medium space-y-1">
+                <p className="font-bold flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                  Предупреждение о недопустимости списывания:
+                </p>
+                <p className="text-[11px] leading-relaxed text-rose-800">
+                  Переключение на поисковые системы, справочники и другие приложения во время экзамена строго запрещено. Не покидайте страницу до завершения всех вопросов.
+                </p>
+              </div>
+
+              <button
+                onClick={() => setShowTabViolationAlert(false)}
+                className="w-full py-2.5 bg-neutral-900 hover:bg-neutral-800 text-white rounded-xl text-xs font-bold transition-colors shadow-sm"
+              >
+                Вернуться к решению билета
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Anti-cheat Status Bar for Exam Mode */}
+        {activeSession.isExamMode && (
+          <div className="bg-slate-900 text-white rounded-2xl px-4 py-2.5 flex items-center justify-between gap-3 text-xs shadow-xs border border-slate-800">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="font-semibold text-[11px] sm:text-xs">
+                Режим строгого контроля ДОСААФ: копирование текста и уход с вкладки заблокированы
+              </span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {tabViolationsCount > 0 ? (
+                <span className="px-2.5 py-0.5 rounded-full bg-rose-500 text-white font-mono font-bold text-[11px] animate-pulse flex items-center gap-1">
+                  <ShieldAlert className="w-3 h-3" />
+                  Нарушений: {tabViolationsCount}
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 text-[11px] font-semibold flex items-center gap-1">
+                  <Check className="w-3 h-3" />
+                  Нарушений нет
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Top Header Card */}
         <div className="bg-white rounded-2xl border border-neutral-200 p-4 shadow-xs flex items-center justify-between gap-4">
           <div className="flex items-center gap-2">
@@ -531,8 +769,13 @@ export const TestsView: React.FC = () => {
           />
         </div>
 
-        {/* Question Card */}
-        <div className="bg-white rounded-3xl border border-neutral-200 p-5 sm:p-7 shadow-xs space-y-6">
+        {/* Question Card with Anti-Copy & Anti-Selection */}
+        <div
+          className="bg-white rounded-3xl border border-neutral-200 p-5 sm:p-7 shadow-xs space-y-6 exam-anti-copy select-none"
+          onContextMenu={(e) => e.preventDefault()}
+          onCopy={(e) => e.preventDefault()}
+          onCut={(e) => e.preventDefault()}
+        >
           <div className="space-y-4">
             {/* Associated Sign or Image */}
             {associatedSign && (
@@ -549,7 +792,8 @@ export const TestsView: React.FC = () => {
                   src={currentQ.imageUrl}
                   alt="Иллюстрация к вопросу"
                   referrerPolicy="no-referrer"
-                  className="max-h-60 max-w-full w-auto object-contain rounded-lg shrink-0"
+                  draggable={false}
+                  className="max-h-60 max-w-full w-auto object-contain rounded-lg shrink-0 pointer-events-none select-none"
                 />
               </div>
             )}
@@ -804,17 +1048,35 @@ export const TestsView: React.FC = () => {
                   </p>
 
                   {isAdmin && (
-                    <div className="pt-2 flex items-center gap-3">
+                    <div className="pt-2 flex items-center gap-2 flex-wrap">
                       <button
                         onClick={() => updateExamSettings({ isOpen: !examSettings.isOpen })}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 ${
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-xs ${
                           examSettings.isOpen
                             ? 'bg-rose-600 hover:bg-rose-700 text-white'
                             : 'bg-emerald-600 hover:bg-emerald-700 text-white'
                         }`}
                       >
                         {examSettings.isOpen ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
-                        <span>{examSettings.isOpen ? 'Закрыть общий доступ для курсантов' : 'Открыть общий доступ для курсантов'}</span>
+                        <span>{examSettings.isOpen ? 'Закрыть доступ курсантов' : 'Открыть доступ курсантов'}</span>
+                      </button>
+
+                      <button
+                        onClick={() => setIsExamQuestionsModalOpen(true)}
+                        className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-amber-400 hover:bg-amber-300 text-neutral-950 transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer"
+                        title="Выбрать, какие вопросы включить в билет, фильтровать по кат. B/C или отредактировать формулировки"
+                      >
+                        <Sliders className="w-3.5 h-3.5 text-neutral-950" />
+                        <span>Решить состав вопросов экзамена</span>
+                      </button>
+
+                      <button
+                        onClick={() => setIsExamSettingsOpen(true)}
+                        className="px-3 py-1.5 rounded-xl text-xs font-bold bg-white/20 hover:bg-white/30 text-white transition-colors flex items-center gap-1.5 cursor-pointer"
+                        title="Настроить таймер, лимит времени и проходной балл"
+                      >
+                        <Timer className="w-3.5 h-3.5" />
+                        <span>Таймер и параметры</span>
                       </button>
                     </div>
                   )}
@@ -961,53 +1223,135 @@ export const TestsView: React.FC = () => {
       {/* MANAGE QUESTIONS BANK TAB (Admin only) */}
       {activeBankTab === 'manage_questions' && isAdmin && (
         <div className="space-y-4">
-          <div className="bg-white rounded-2xl border border-neutral-200 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
-            <div className="flex items-center gap-2">
-              <Filter className="w-4 h-4 text-neutral-400" />
-              <select
-                value={selectedCatFilter}
-                onChange={(e) => setSelectedCatFilter(e.target.value)}
-                className="px-3 py-1.5 bg-neutral-50 rounded-xl border border-neutral-200 text-xs"
-              >
-                <option value="all">Все категории ({questions.length})</option>
-                {categories.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.title}
-                  </option>
-                ))}
-              </select>
+          <div className="bg-white rounded-2xl border border-neutral-200 p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4 shadow-xs">
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5">
+                <Filter className="w-4 h-4 text-neutral-400" />
+                <select
+                  value={selectedCatFilter}
+                  onChange={(e) => setSelectedCatFilter(e.target.value)}
+                  className="px-3 py-1.5 bg-neutral-50 rounded-xl border border-neutral-200 text-xs"
+                >
+                  <option value="all">Все категории ({questions.length})</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Exam Pool filter */}
+              <div className="flex items-center p-1 bg-neutral-100 rounded-xl border border-neutral-200 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setExamInclusionFilter('all')}
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
+                    examInclusionFilter === 'all'
+                      ? 'bg-white text-neutral-900 shadow-xs font-bold'
+                      : 'text-neutral-500 hover:text-neutral-900'
+                  }`}
+                >
+                  Все ({questions.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setExamInclusionFilter('included')}
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-all flex items-center gap-1 ${
+                    examInclusionFilter === 'included'
+                      ? 'bg-emerald-600 text-white shadow-xs font-bold'
+                      : 'text-neutral-500 hover:text-emerald-700'
+                  }`}
+                >
+                  <ShieldCheck className="w-3 h-3" />
+                  В экзамене ({questions.filter((q) => q.includeInExam !== false).length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setExamInclusionFilter('excluded')}
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-all flex items-center gap-1 ${
+                    examInclusionFilter === 'excluded'
+                      ? 'bg-neutral-800 text-white shadow-xs font-bold'
+                      : 'text-neutral-500 hover:text-neutral-900'
+                  }`}
+                >
+                  <Minus className="w-3 h-3" />
+                  Исключены ({questions.filter((q) => q.includeInExam === false).length})
+                </button>
+              </div>
             </div>
 
-            <button
-              onClick={() => {
-                setEditingQuestionId(null);
-                setQFormData({
-                  categoryId: categories[0]?.id || '',
-                  questionText: '',
-                  options: ['', '', '', ''],
-                  correctAnswerIndex: 0,
-                  explanation: '',
-                  imageUrl: '',
-                  signId: '',
-                  groupTarget: 'all',
-                  difficulty: 'medium',
-                });
-                setIsQuestionModalOpen(true);
-              }}
-              className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors self-start sm:self-auto"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Создать карточку вопроса</span>
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Batch pool controls */}
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const candidateIds = questions
+                      .filter((q) => selectedCatFilter === 'all' || q.categoryId === selectedCatFilter)
+                      .map((q) => q.id);
+                    batchSetQuestionsExamInclusion(candidateIds, true);
+                  }}
+                  className="px-3 py-1.5 rounded-xl border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-semibold flex items-center gap-1 transition-colors"
+                  title="Включить все показанные вопросы в экзаменационный билет"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Включить все в экзамен</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const candidateIds = questions
+                      .filter((q) => selectedCatFilter === 'all' || q.categoryId === selectedCatFilter)
+                      .map((q) => q.id);
+                    batchSetQuestionsExamInclusion(candidateIds, false);
+                  }}
+                  className="px-3 py-1.5 rounded-xl border border-neutral-300 bg-neutral-50 hover:bg-neutral-100 text-neutral-700 text-xs font-semibold flex items-center gap-1 transition-colors"
+                  title="Исключить все показанные вопросы из экзаменационного пула"
+                >
+                  <Minus className="w-3.5 h-3.5 text-neutral-500" />
+                  <span>Исключить все</span>
+                </button>
+              </div>
+
+              <button
+                onClick={() => {
+                  setEditingQuestionId(null);
+                  setQFormData({
+                    categoryId: categories[0]?.id || '',
+                    questionText: '',
+                    options: ['', '', '', ''],
+                    correctAnswerIndex: 0,
+                    explanation: '',
+                    imageUrl: '',
+                    signId: '',
+                    groupTarget: 'all',
+                    difficulty: 'medium',
+                    includeInExam: true,
+                  });
+                  setIsQuestionModalOpen(true);
+                }}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors self-start lg:self-auto"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Создать вопрос</span>
+              </button>
+            </div>
           </div>
 
           {/* List of questions */}
           <div className="space-y-3">
             {questions
               .filter((q) => selectedCatFilter === 'all' || q.categoryId === selectedCatFilter)
+              .filter((q) => {
+                if (examInclusionFilter === 'included') return q.includeInExam !== false;
+                if (examInclusionFilter === 'excluded') return q.includeInExam === false;
+                return true;
+              })
               .map((q) => {
                 const cat = categories.find((c) => c.id === q.categoryId);
                 const sign = q.signId ? signs.find((s) => s.id === q.signId) : null;
+                const isIncludedInExam = q.includeInExam !== false;
 
                 return (
                   <div
@@ -1041,6 +1385,19 @@ export const TestsView: React.FC = () => {
                               {getGroupName(q.groupTarget)}
                             </span>
                           )}
+
+                          {/* Exam pool tag */}
+                          {isIncludedInExam ? (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1">
+                              <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                              В пуле экзамена
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-neutral-100 text-neutral-600 border border-neutral-200 flex items-center gap-1">
+                              <Minus className="w-3 h-3 text-neutral-400" />
+                              Исключен из экзамена
+                            </span>
+                          )}
                         </div>
                         <h4 className="text-xs sm:text-sm font-bold text-neutral-900 leading-snug">
                           {q.questionText}
@@ -1051,7 +1408,31 @@ export const TestsView: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-1 self-end sm:self-auto shrink-0">
+                    <div className="flex items-center gap-2 self-end sm:self-auto shrink-0 flex-wrap">
+                      {/* Toggle exam pool button */}
+                      <button
+                        type="button"
+                        onClick={() => toggleQuestionExamInclusion(q.id)}
+                        className={`px-2.5 py-1.5 rounded-xl text-xs font-bold border transition-colors flex items-center gap-1.5 ${
+                          isIncludedInExam
+                            ? 'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100'
+                            : 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
+                        }`}
+                        title={isIncludedInExam ? 'Исключить этот вопрос из экзамена' : 'Включить этот вопрос в экзамен'}
+                      >
+                        {isIncludedInExam ? (
+                          <>
+                            <Minus className="w-3 h-3" />
+                            <span>Исключить из экзамена</span>
+                          </>
+                        ) : (
+                          <>
+                            <ShieldCheck className="w-3 h-3" />
+                            <span>Включить в экзамен</span>
+                          </>
+                        )}
+                      </button>
+
                       <button
                         onClick={() => {
                           setEditingQuestionId(q.id);
@@ -1065,6 +1446,7 @@ export const TestsView: React.FC = () => {
                             signId: q.signId || '',
                             groupTarget: q.groupTarget || 'all',
                             difficulty: q.difficulty || 'medium',
+                            includeInExam: q.includeInExam !== false,
                           });
                           setIsQuestionModalOpen(true);
                         }}
@@ -1367,20 +1749,23 @@ export const TestsView: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="font-semibold text-neutral-700 block mb-1">Для какой группы</label>
+                  <label className="font-semibold text-neutral-700 block mb-1">Для какой группы / категории</label>
                   <select
                     value={qFormData.groupTarget}
                     onChange={(e) =>
                       setQFormData({
                         ...qFormData,
-                        groupTarget: e.target.value as 'all' | 'group7_mkpp' | 'group8_akpp',
+                        groupTarget: e.target.value,
                       })
                     }
                     className="w-full px-3 py-2 border rounded-xl bg-white"
                   >
-                    <option value="all">Для всех (Общий вопрос)</option>
-                    <option value="group7_mkpp">Только Группа №7 (МКПП)</option>
-                    <option value="group8_akpp">Только Группа №8 (АКПП)</option>
+                    <option value="all">Для всех групп и категорий (B и C)</option>
+                    {groups.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.name} — {g.category ? `Кат. ${g.category}` : ''} ({g.transmission})
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -1465,6 +1850,26 @@ export const TestsView: React.FC = () => {
                 </select>
               </div>
 
+              {/* Include in Exam Pool toggle */}
+              <div className="p-3 bg-neutral-50 rounded-xl border border-neutral-200 flex items-center justify-between gap-2">
+                <div>
+                  <span className="font-semibold text-neutral-800 block text-xs">
+                    Включать в государственный экзамен
+                  </span>
+                  <span className="text-[11px] text-neutral-500 block">
+                    Вопрос будет попадать в случайную выборку при сдаче экзамена
+                  </span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={qFormData.includeInExam !== false}
+                  onChange={(e) =>
+                    setQFormData({ ...qFormData, includeInExam: e.target.checked })
+                  }
+                  className="w-5 h-5 accent-emerald-600 rounded cursor-pointer"
+                />
+              </div>
+
               <div className="pt-2 flex justify-end gap-2">
                 <button
                   type="button"
@@ -1481,6 +1886,621 @@ export const TestsView: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* PRE-EXAM WARNING & INSTRUCTION MODAL */}
+      {isExamWarningOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs animate-in fade-in">
+          <div className="relative w-full max-w-xl bg-white rounded-3xl shadow-2xl border border-neutral-200 p-6 sm:p-7 max-h-[92vh] overflow-y-auto space-y-5">
+            <button
+              onClick={() => setIsExamWarningOpen(false)}
+              className="absolute right-4 top-4 p-2 text-neutral-400 hover:text-neutral-700 rounded-xl"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {/* Header */}
+            <div className="flex items-start gap-3.5 pr-8">
+              <div className="w-12 h-12 rounded-2xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+                <ShieldAlert className="w-7 h-7" />
+              </div>
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 block">
+                  ДОСААФ России • Экзаменационный регламент
+                </span>
+                <h3 className="text-lg font-black text-neutral-900 leading-tight">
+                  Государственный экзамен по ПДД
+                </h3>
+                <p className="text-xs text-neutral-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                  <span>Курсант: <strong className="text-neutral-800">{currentUser?.name || 'Курсант ДОСААФ'}</strong></span>
+                  <span>•</span>
+                  <span className="font-semibold text-neutral-700">{getGroupName(currentUser?.group)}</span>
+                  {groups.find((g) => g.id === currentUser?.group)?.category === 'C' ? (
+                    <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 font-bold text-[10px] border border-amber-300">
+                      Категория «C» (Грузовые)
+                    </span>
+                  ) : (
+                    <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-900 font-bold text-[10px] border border-blue-300">
+                      Категория «B» (Легковые)
+                    </span>
+                  )}
+                </p>
+              </div>
+            </div>
+
+            {/* Exam Parameters Overview */}
+            <div className="grid grid-cols-3 gap-2.5 text-center">
+              <div className="p-3 bg-neutral-50 rounded-2xl border border-neutral-200">
+                <span className="text-[10px] text-neutral-400 font-bold uppercase block">Билет</span>
+                <span className="text-base font-black text-neutral-900">
+                  {Math.min(
+                    examSettings.questionCount || 20,
+                    availableQuestions.filter((q) => q.includeInExam !== false).length
+                  )}{' '}
+                  вопр.
+                </span>
+              </div>
+              <div className="p-3 bg-neutral-50 rounded-2xl border border-neutral-200">
+                <span className="text-[10px] text-neutral-400 font-bold uppercase block">Время</span>
+                <span className="text-base font-black text-neutral-900">
+                  {examSettings.timeLimitMinutes || 20} минут
+                </span>
+              </div>
+              <div className="p-3 bg-neutral-50 rounded-2xl border border-neutral-200">
+                <span className="text-[10px] text-neutral-400 font-bold uppercase block">Допуск</span>
+                <span className="text-base font-black text-emerald-600">≤ 2 ошибок</span>
+              </div>
+            </div>
+
+            {/* Anti-Cheating Rules Box */}
+            <div className="p-4 bg-amber-50/80 rounded-2xl border border-amber-300 space-y-3">
+              <div className="flex items-center gap-2 text-amber-950 font-bold text-xs">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>Правила проведения экзамена и строгий контроль анти-списывания:</span>
+              </div>
+
+              <ul className="space-y-2 text-xs text-amber-900/90 pl-1 leading-relaxed">
+                <li className="flex items-start gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-600 shrink-0 mt-1.5" />
+                  <span>
+                    <strong>Запрет переключения вкладок:</strong> во время сдачи запрещено покидать данную вкладку, переключаться в другие окна или сворачивать браузер.
+                  </span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-600 shrink-0 mt-1.5" />
+                  <span>
+                    <strong>Электронный протокол:</strong> каждый уход с вкладки мгновенно регистрируется и отображается в журнале нарушений преподавателя.
+                  </span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-600 shrink-0 mt-1.5" />
+                  <span>
+                    <strong>Защита от копирования:</strong> выделение и копирование формулировок вопросов и вариантов ответов заблокировано на уровне системы.
+                  </span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-600 shrink-0 mt-1.5" />
+                  <span>
+                    <strong>Непрерывность:</strong> по истечении 20 минут экзамен завершится автоматически с текущим результатом.
+                  </span>
+                </li>
+              </ul>
+            </div>
+
+            {/* Agreement Checkbox */}
+            <label className="flex items-start gap-3 p-3.5 bg-neutral-50 rounded-2xl border border-neutral-200 cursor-pointer hover:bg-neutral-100 transition-colors">
+              <input
+                type="checkbox"
+                checked={examAgreementChecked}
+                onChange={(e) => setExamAgreementChecked(e.target.checked)}
+                className="w-5 h-5 mt-0.5 accent-blue-600 rounded cursor-pointer shrink-0"
+              />
+              <span className="text-xs text-neutral-800 leading-snug">
+                Я подтверждаю, что ознакомлен(а) с регламентом сдачи экзамена ДОСААФ, правилами анти-списывания и готов(а) начать тестирование честно без подсказок.
+              </span>
+            </label>
+
+            {/* Action Buttons */}
+            <div className="pt-2 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setIsExamWarningOpen(false)}
+                className="px-4 py-2.5 border border-neutral-200 text-neutral-600 hover:bg-neutral-100 rounded-xl text-xs font-bold transition-colors"
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                disabled={!examAgreementChecked}
+                onClick={handleConfirmStartExam}
+                className={`px-6 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-xs ${
+                  examAgreementChecked
+                    ? 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'
+                    : 'bg-neutral-200 text-neutral-400 cursor-not-allowed'
+                }`}
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Начать экзамен</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EXAM QUESTIONS BUILDER & MANAGER MODAL (Admin) */}
+      {isExamQuestionsModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-xs animate-in fade-in">
+          <div className="relative w-full max-w-5xl bg-white rounded-3xl shadow-2xl border border-neutral-200 p-5 sm:p-7 max-h-[94vh] flex flex-col space-y-4">
+            {/* Header */}
+            <div className="flex items-start justify-between gap-4 pb-3 border-b border-neutral-200 shrink-0">
+              <div className="flex items-start gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-amber-500 text-neutral-950 flex items-center justify-center shrink-0 shadow-xs font-black">
+                  <Sliders className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-lg sm:text-xl font-black text-neutral-900 leading-tight">
+                      Управление вопросами государственного экзамена
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 font-bold text-[11px] border border-amber-300">
+                      ДОСААФ
+                    </span>
+                  </div>
+                  <p className="text-xs text-neutral-500 mt-0.5">
+                    Решайте, какие вопросы попадут в экзаменационный билет, настраивайте категории B и C и редактируйте формулировки.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setIsExamQuestionsModalOpen(false)}
+                className="p-2 text-neutral-400 hover:text-neutral-700 rounded-xl hover:bg-neutral-100 transition-colors"
+                title="Закрыть окно"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Quick Stats & Ticket Size Config */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 shrink-0 text-xs">
+              <div className="p-3 bg-neutral-50 rounded-2xl border border-neutral-200">
+                <span className="text-[10px] text-neutral-400 font-bold uppercase block">Всего в базе</span>
+                <span className="text-lg font-black text-neutral-900">{questions.length} вопр.</span>
+              </div>
+              <div className="p-3 bg-emerald-50 rounded-2xl border border-emerald-200">
+                <span className="text-[10px] text-emerald-700 font-bold uppercase block">В пуле экзамена</span>
+                <span className="text-lg font-black text-emerald-700">
+                  {questions.filter((q) => q.includeInExam !== false).length} вопр.
+                </span>
+              </div>
+              <div className="p-3 bg-blue-50 rounded-2xl border border-blue-200">
+                <span className="text-[10px] text-blue-700 font-bold uppercase block">Вопросы Кат. B</span>
+                <span className="text-lg font-black text-blue-700">
+                  {questions.filter((q) => q.categoryType !== 'C' && q.groupTarget !== 'group3_c').length} вопр.
+                </span>
+              </div>
+              <div className="p-3 bg-amber-50 rounded-2xl border border-amber-200">
+                <span className="text-[10px] text-amber-800 font-bold uppercase block">Вопросы Кат. C (Грузовые)</span>
+                <span className="text-lg font-black text-amber-800">
+                  {questions.filter((q) => q.categoryType === 'C' || q.groupTarget === 'group3_c').length} вопр.
+                </span>
+              </div>
+            </div>
+
+            {/* Ticket parameters & Quick presets */}
+            <div className="p-3.5 bg-neutral-50 rounded-2xl border border-neutral-200 flex items-center justify-between gap-3 flex-wrap shrink-0">
+              <div className="flex items-center gap-4 flex-wrap text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-neutral-700">Вопросов в билете:</span>
+                  <div className="flex items-center gap-1">
+                    {[10, 20, 30, 40].map((count) => (
+                      <button
+                        key={count}
+                        onClick={() => updateExamSettings({ questionCount: count })}
+                        className={`px-2.5 py-1 rounded-lg font-bold text-xs transition-colors ${
+                          (examSettings.questionCount || 20) === count
+                            ? 'bg-neutral-900 text-white'
+                            : 'bg-white border text-neutral-700 hover:bg-neutral-100'
+                        }`}
+                      >
+                        {count}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-neutral-700">Время на экзамен:</span>
+                  <div className="flex items-center gap-1">
+                    {[15, 20, 25, 30].map((mins) => (
+                      <button
+                        key={mins}
+                        onClick={() => updateExamSettings({ timeLimitMinutes: mins })}
+                        className={`px-2.5 py-1 rounded-lg font-bold text-xs transition-colors ${
+                          (examSettings.timeLimitMinutes || 20) === mins
+                            ? 'bg-neutral-900 text-white'
+                            : 'bg-white border text-neutral-700 hover:bg-neutral-100'
+                        }`}
+                      >
+                        {mins} мин
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Bulk Presets */}
+              <div className="flex items-center gap-2 flex-wrap text-xs">
+                <span className="text-neutral-500 text-[11px] font-medium">Быстрый выбор:</span>
+                <button
+                  onClick={() => {
+                    questions.forEach((q) => {
+                      if (q.includeInExam === false) {
+                        updateQuestion(q.id, { includeInExam: true });
+                      }
+                    });
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-900 font-bold transition-colors cursor-pointer"
+                  title="Включить абсолютно все вопросы базы в экзамен"
+                >
+                  Включить все
+                </button>
+                <button
+                  onClick={() => {
+                    questions.forEach((q) => {
+                      const isC = q.categoryType === 'C' || q.groupTarget === 'group3_c';
+                      updateQuestion(q.id, { includeInExam: !isC });
+                    });
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-blue-100 hover:bg-blue-200 text-blue-900 font-bold transition-colors cursor-pointer"
+                  title="Включить только вопросы для легковых автомобилей (Категория B)"
+                >
+                  Пакет «Кат. B»
+                </button>
+                <button
+                  onClick={() => {
+                    questions.forEach((q) => {
+                      const isC = q.categoryType === 'C' || q.groupTarget === 'group3_c' || q.groupTarget === 'all';
+                      updateQuestion(q.id, { includeInExam: isC });
+                    });
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold transition-colors cursor-pointer"
+                  title="Включить профильные вопросы для грузовых авто (Категория C)"
+                >
+                  Пакет «Кат. C»
+                </button>
+                <button
+                  onClick={() => {
+                    if (confirm('Исключить все вопросы из экзамена? Курсанты не смогут сдать экзамен, пока вы не включите вопросы.')) {
+                      questions.forEach((q) => {
+                        updateQuestion(q.id, { includeInExam: false });
+                      });
+                    }
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-800 font-bold transition-colors cursor-pointer"
+                  title="Исключить все вопросы из экзамена"
+                >
+                  Снять все
+                </button>
+                <button
+                  onClick={() => {
+                    setEditingQuestionId(null);
+                    setQFormData({
+                      categoryId: categories[0]?.id || '',
+                      questionText: '',
+                      options: ['', '', '', ''],
+                      correctAnswerIndex: 0,
+                      explanation: '',
+                      imageUrl: '',
+                      signId: '',
+                      groupTarget: 'all',
+                      difficulty: 'medium',
+                      includeInExam: true,
+                    });
+                    setIsQuestionModalOpen(true);
+                  }}
+                  className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-neutral-950 font-bold flex items-center gap-1 shadow-xs cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Создать вопрос</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Filter Bar */}
+            <div className="flex items-center gap-2.5 flex-wrap shrink-0">
+              <div className="relative flex-1 min-w-[200px]">
+                <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Поиск по тексту вопроса или ответам..."
+                  value={examQSearch}
+                  onChange={(e) => setExamQSearch(e.target.value)}
+                  className="w-full pl-9 pr-8 py-1.5 text-xs bg-neutral-50 border border-neutral-200 rounded-xl focus:bg-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+                />
+                {examQSearch && (
+                  <button
+                    onClick={() => setExamQSearch('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Target Class Filter (B / C / All) */}
+              <div className="flex items-center gap-1 bg-neutral-100 p-1 rounded-xl text-xs font-semibold">
+                <button
+                  onClick={() => setExamQTargetFilter('all')}
+                  className={`px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${
+                    examQTargetFilter === 'all' ? 'bg-white text-neutral-900 shadow-xs' : 'text-neutral-600 hover:text-neutral-900'
+                  }`}
+                >
+                  Все классы
+                </button>
+                <button
+                  onClick={() => setExamQTargetFilter('B')}
+                  className={`px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1 cursor-pointer ${
+                    examQTargetFilter === 'B' ? 'bg-blue-600 text-white shadow-xs' : 'text-neutral-600 hover:text-neutral-900'
+                  }`}
+                >
+                  <Car className="w-3 h-3" />
+                  <span>Кат. B</span>
+                </button>
+                <button
+                  onClick={() => setExamQTargetFilter('C')}
+                  className={`px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1 cursor-pointer ${
+                    examQTargetFilter === 'C' ? 'bg-amber-600 text-white shadow-xs' : 'text-neutral-600 hover:text-neutral-900'
+                  }`}
+                >
+                  <Truck className="w-3 h-3" />
+                  <span>Кат. C</span>
+                </button>
+              </div>
+
+              {/* Status Filter */}
+              <div className="flex items-center gap-1 bg-neutral-100 p-1 rounded-xl text-xs font-semibold">
+                <button
+                  onClick={() => setExamQStatusFilter('all')}
+                  className={`px-2 py-1 rounded-lg transition-colors cursor-pointer ${
+                    examQStatusFilter === 'all' ? 'bg-white text-neutral-900 shadow-xs' : 'text-neutral-600 hover:text-neutral-900'
+                  }`}
+                >
+                  Все ({questions.length})
+                </button>
+                <button
+                  onClick={() => setExamQStatusFilter('included')}
+                  className={`px-2 py-1 rounded-lg transition-colors cursor-pointer ${
+                    examQStatusFilter === 'included' ? 'bg-emerald-600 text-white shadow-xs' : 'text-emerald-800 hover:bg-emerald-50'
+                  }`}
+                >
+                  В экзамене ({questions.filter((q) => q.includeInExam !== false).length})
+                </button>
+                <button
+                  onClick={() => setExamQStatusFilter('excluded')}
+                  className={`px-2 py-1 rounded-lg transition-colors cursor-pointer ${
+                    examQStatusFilter === 'excluded' ? 'bg-rose-600 text-white shadow-xs' : 'text-rose-800 hover:bg-rose-50'
+                  }`}
+                >
+                  Исключены ({questions.filter((q) => q.includeInExam === false).length})
+                </button>
+              </div>
+
+              {/* Category Dropdown */}
+              <select
+                value={examQCatFilter}
+                onChange={(e) => setExamQCatFilter(e.target.value)}
+                className="px-2.5 py-1.5 text-xs bg-neutral-50 border border-neutral-200 rounded-xl focus:bg-white"
+              >
+                <option value="all">Все темы ({categories.length})</option>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Questions Scrollable List */}
+            <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+              {filteredExamQuestions.length === 0 ? (
+                <div className="text-center py-12 bg-neutral-50 rounded-2xl border border-dashed border-neutral-300 space-y-2">
+                  <FileQuestion className="w-10 h-10 text-neutral-400 mx-auto" />
+                  <p className="text-sm font-bold text-neutral-700">Вопросов по выбранным фильтрам не найдено</p>
+                  <p className="text-xs text-neutral-400">Попробуйте изменить поисковый запрос или фильтры статуса.</p>
+                </div>
+              ) : (
+                filteredExamQuestions.map((q, idx) => {
+                  const isIncluded = q.includeInExam !== false;
+                  const cat = categories.find((c) => c.id === q.categoryId);
+                  const isC = q.categoryType === 'C' || q.groupTarget === 'group3_c';
+
+                  return (
+                    <div
+                      key={q.id}
+                      className={`p-4 rounded-2xl border transition-all ${
+                        isIncluded
+                          ? 'bg-white border-neutral-200 hover:border-neutral-300 shadow-xs'
+                          : 'bg-neutral-50/80 border-neutral-200 opacity-70'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 space-y-2">
+                          {/* Badges */}
+                          <div className="flex items-center gap-1.5 flex-wrap text-[10px] font-bold">
+                            <span className="px-2 py-0.5 rounded-md bg-neutral-100 text-neutral-700 border">
+                              № {idx + 1}
+                            </span>
+                            <span className="px-2 py-0.5 rounded-md bg-neutral-100 text-neutral-700">
+                              {cat?.title || 'Общая тема'}
+                            </span>
+                            {isC ? (
+                              <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1">
+                                <Truck className="w-3 h-3" />
+                                <span>Категория «C» (Грузовые)</span>
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-md bg-blue-100 text-blue-900 border border-blue-300 flex items-center gap-1">
+                                <Car className="w-3 h-3" />
+                                <span>Категория «B» (Легковые)</span>
+                              </span>
+                            )}
+                            {q.groupTarget && q.groupTarget !== 'all' && (
+                              <span className="px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-800 border border-indigo-200">
+                                {getGroupName(q.groupTarget)}
+                              </span>
+                            )}
+                            <span
+                              className={`px-2 py-0.5 rounded-md ${
+                                isIncluded
+                                  ? 'bg-emerald-100 text-emerald-800 font-bold border border-emerald-300'
+                                  : 'bg-rose-100 text-rose-800 border border-rose-200'
+                              }`}
+                            >
+                              {isIncluded ? '✓ В экзамене' : '✕ Исключен из билетов'}
+                            </span>
+                          </div>
+
+                          {/* Image or Sign preview */}
+                          {(q.imageUrl || q.signId) && (
+                            <div className="flex items-center gap-3 pt-1">
+                              {q.imageUrl && (
+                                <img
+                                  src={q.imageUrl}
+                                  alt="Иллюстрация"
+                                  className="h-16 w-24 object-cover rounded-xl border border-neutral-200"
+                                  referrerPolicy="no-referrer"
+                                />
+                              )}
+                              {q.signId && (
+                                <div className="p-1.5 bg-neutral-50 rounded-xl border border-neutral-200">
+                                  {signs.find((s) => s.id === q.signId) && (
+                                    <RoadSignSvg sign={signs.find((s) => s.id === q.signId)!} size={48} />
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Question Text */}
+                          <p className="text-sm font-bold text-neutral-900 leading-snug">
+                            {q.questionText}
+                          </p>
+
+                          {/* Options preview */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1 text-xs">
+                            {q.options.map((opt, oIdx) => {
+                              const isCorrect = oIdx === q.correctAnswerIndex;
+                              return (
+                                <div
+                                  key={oIdx}
+                                  className={`px-2.5 py-1.5 rounded-xl border flex items-center gap-2 ${
+                                    isCorrect
+                                      ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-semibold'
+                                      : 'bg-neutral-50 border-neutral-200 text-neutral-600'
+                                  }`}
+                                >
+                                  <span
+                                    className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                                      isCorrect
+                                        ? 'bg-emerald-600 text-white'
+                                        : 'bg-neutral-200 text-neutral-600'
+                                    }`}
+                                  >
+                                    {oIdx + 1}
+                                  </span>
+                                  <span className="truncate">{opt}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Actions right side */}
+                        <div className="flex flex-col items-end gap-2 shrink-0">
+                          {/* Big 1-Click Toggle */}
+                          <button
+                            onClick={() => {
+                              updateQuestion(q.id, { includeInExam: !isIncluded });
+                            }}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer ${
+                              isIncluded
+                                ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                                : 'bg-neutral-200 hover:bg-neutral-300 text-neutral-700'
+                            }`}
+                            title={isIncluded ? 'Нажмите, чтобы исключить из экзамена' : 'Нажмите, чтобы включить в экзамен'}
+                          >
+                            {isIncluded ? (
+                              <>
+                                <Check className="w-3.5 h-3.5" />
+                                <span>В экзамене</span>
+                              </>
+                            ) : (
+                              <>
+                                <Plus className="w-3.5 h-3.5" />
+                                <span>Включить</span>
+                              </>
+                            )}
+                          </button>
+
+                          {/* Edit button */}
+                          <button
+                            onClick={() => {
+                              setEditingQuestionId(q.id);
+                              setQFormData({
+                                categoryId: q.categoryId,
+                                questionText: q.questionText,
+                                options: [...q.options, '', '', ''].slice(0, 4),
+                                correctAnswerIndex: q.correctAnswerIndex,
+                                explanation: q.explanation || '',
+                                imageUrl: q.imageUrl || '',
+                                signId: q.signId || '',
+                                groupTarget: q.groupTarget || 'all',
+                                difficulty: q.difficulty || 'medium',
+                                includeInExam: q.includeInExam !== false,
+                              });
+                              setIsQuestionModalOpen(true);
+                            }}
+                            className="px-2.5 py-1 rounded-lg border border-neutral-200 hover:bg-neutral-100 text-neutral-700 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                          >
+                            <Edit2 className="w-3 h-3 text-neutral-500" />
+                            <span>Изменить</span>
+                          </button>
+
+                          {/* Delete button */}
+                          <button
+                            onClick={() => {
+                              if (confirm(`Удалить вопрос "${q.questionText.slice(0, 40)}..." из базы?`)) {
+                                deleteQuestion(q.id);
+                              }
+                            }}
+                            className="p-1.5 text-neutral-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer"
+                            title="Удалить вопрос"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="pt-3 border-t border-neutral-200 flex items-center justify-between gap-3 shrink-0 text-xs">
+              <div className="text-neutral-500 text-[11px]">
+                Показано: <strong className="text-neutral-800">{filteredExamQuestions.length}</strong> из {questions.length} вопросов базы.
+              </div>
+              <button
+                onClick={() => setIsExamQuestionsModalOpen(false)}
+                className="px-5 py-2 bg-neutral-900 hover:bg-neutral-950 text-white rounded-xl font-bold transition-colors shadow-xs cursor-pointer"
+              >
+                Готово (Применить к экзамену)
+              </button>
+            </div>
           </div>
         </div>
       )}

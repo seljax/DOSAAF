@@ -45,6 +45,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
     getGroupName,
     canAccessTab,
     navTabs,
+    isExamInProgress,
   } = useApp();
   const { isDesignMode, toggleDesignMode } = useDesignEditor();
 
@@ -99,6 +100,20 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
   return (
     <>
       <header className="sticky top-0 z-40">
+        {/* Anti-cheat banner during active state exam */}
+        {isExamInProgress && (
+          <div className="bg-amber-500 text-neutral-950 px-4 py-2 text-xs font-bold flex items-center justify-between flex-wrap gap-2 shadow-xs border-b border-amber-600 animate-in fade-in">
+            <div className="flex items-center gap-2">
+              <ShieldAlert className="w-4 h-4 text-neutral-950" />
+              <span>РЕЖИМ ГОСУДАРСТВЕННОГО ЭКЗАМЕНА: Все остальные вкладки заблокированы для предотвращения списывания</span>
+            </div>
+            <div className="flex items-center gap-2 text-[11px] font-mono">
+              <span>Курсант: {currentUser?.name}</span>
+              <span className="px-2 py-0.5 rounded bg-neutral-950 text-amber-400 font-bold">Окно защищено</span>
+            </div>
+          </div>
+        )}
+
         {/* Admin Bar if logged in */}
         {isAdmin && (
           <div className="bg-amber-600 text-white text-xs px-4 py-1.5 flex items-center justify-between flex-wrap gap-2">
@@ -221,7 +236,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
                 id="header_brand"
                 label="Логотип и Название ДОСААФ"
                 defaultTitle="ДОСААФ"
-                defaultBadge="Кат. B"
+                defaultBadge="Кат. B / C"
                 defaultClasses={{
                   bg: 'bg-transparent',
                   border: 'border-transparent',
@@ -244,20 +259,20 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
                           {title || 'ДОСААФ'}
                         </span>
                         <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-md bg-neutral-100 text-neutral-700 font-bold border border-neutral-200">
-                          {badge || 'Кат. B'}
+                          {badge || 'Кат. B / C'}
                         </span>
                       </div>
                       <div className="flex items-center gap-1 text-[10px] sm:text-xs text-neutral-500 font-medium overflow-hidden max-w-[220px] sm:max-w-none mt-0.5">
-                        {groups.slice(0, 3).map((g, idx) => (
+                        {groups.slice(0, 4).map((g, idx) => (
                           <React.Fragment key={g.id}>
                             {idx > 0 && <span className="text-neutral-300">•</span>}
-                            <span className={g.transmission === 'АКПП' ? 'text-indigo-700 font-semibold' : 'text-blue-700 font-semibold'}>
-                              Гр. №{g.number} ({g.transmission})
+                            <span className={g.category === 'C' ? 'text-amber-700 font-semibold' : g.transmission === 'АКПП' ? 'text-indigo-700 font-semibold' : 'text-blue-700 font-semibold'}>
+                              Гр. №{g.number} ({g.category === 'C' ? 'Кат. C' : g.transmission})
                             </span>
                           </React.Fragment>
                         ))}
-                        {groups.length > 3 && (
-                          <span className="text-neutral-400 text-[10px]">+{groups.length - 3}</span>
+                        {groups.length > 4 && (
+                          <span className="text-neutral-400 text-[10px]">+{groups.length - 4}</span>
                         )}
                       </div>
                     </div>
@@ -274,10 +289,16 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
                   const hasAccess = canAccessTab(item.id);
                   const isActive = activeTab === item.id;
 
+                  const isTabLockedByExam = isExamInProgress && item.id !== 'tests';
+
                   return (
                     <button
                       key={item.id}
                       onClick={() => {
+                        if (isTabLockedByExam) {
+                          alert('Во время сдачи государственного экзамена переход в другие разделы заблокирован для исключения списывания!');
+                          return;
+                        }
                         if (hasAccess) {
                           setActiveTab(item.id);
                         } else {
@@ -286,17 +307,20 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
                           );
                         }
                       }}
+                      disabled={isTabLockedByExam}
                       className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
-                        !hasAccess
+                        isTabLockedByExam
+                          ? 'text-neutral-400 opacity-50 cursor-not-allowed'
+                          : !hasAccess
                           ? 'text-neutral-400 opacity-60 hover:bg-neutral-100/50 cursor-not-allowed'
                           : isActive
                           ? 'bg-neutral-100 text-neutral-900 font-semibold'
                           : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50'
                       }`}
-                      title={!hasAccess ? 'Доступ ограничен администратором' : undefined}
+                      title={isTabLockedByExam ? 'Переход заблокирован во время экзамена' : !hasAccess ? 'Доступ ограничен администратором' : undefined}
                     >
                       <span>{item.label}</span>
-                      {!hasAccess && <Lock className="w-3 h-3 text-neutral-400 shrink-0" />}
+                      {(isTabLockedByExam || !hasAccess) && <Lock className="w-3 h-3 text-neutral-400 shrink-0" />}
                     </button>
                   );
                 })}
@@ -304,9 +328,18 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
               {/* Profile Tab: Available when student is logged in, OR when administrator is logged in */}
               {(isAdmin || (currentUser && Boolean(currentUser.name))) && (
                 <button
-                  onClick={() => setActiveTab('profile')}
+                  onClick={() => {
+                    if (isExamInProgress) {
+                      alert('Во время сдачи государственного экзамена переход в профиль заблокирован!');
+                      return;
+                    }
+                    setActiveTab('profile');
+                  }}
+                  disabled={isExamInProgress}
                   className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
-                    activeTab === 'profile'
+                    isExamInProgress
+                      ? 'text-neutral-400 opacity-50 cursor-not-allowed'
+                      : activeTab === 'profile'
                       ? isAdmin
                         ? 'bg-amber-100 text-amber-900 font-bold'
                         : 'bg-blue-100 text-blue-900 font-bold'
@@ -314,19 +347,29 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
                       ? 'text-amber-800 hover:bg-amber-50 font-semibold'
                       : 'text-blue-700 hover:bg-blue-50 font-semibold'
                   }`}
-                  title={isAdmin ? 'Кабинет администратора' : 'Личный кабинет курсанта'}
+                  title={isExamInProgress ? 'Заблокировано во время экзамена' : isAdmin ? 'Кабинет администратора' : 'Личный кабинет курсанта'}
                 >
                   <UserIcon className="w-3.5 h-3.5" />
                   <span>Профиль</span>
+                  {isExamInProgress && <Lock className="w-3 h-3 text-neutral-400 shrink-0" />}
                 </button>
               )}
 
               {/* Statistics is visible ONLY for Admin */}
               {isAdmin && (
                 <button
-                  onClick={() => setActiveTab('stats')}
+                  onClick={() => {
+                    if (isExamInProgress) {
+                      alert('Во время экзамена переход заблокирован!');
+                      return;
+                    }
+                    setActiveTab('stats');
+                  }}
+                  disabled={isExamInProgress}
                   className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1 ${
-                    activeTab === 'stats'
+                    isExamInProgress
+                      ? 'text-neutral-400 opacity-50 cursor-not-allowed'
+                      : activeTab === 'stats'
                       ? 'bg-amber-100 text-amber-900 font-bold'
                       : 'text-amber-800 hover:bg-amber-50 font-semibold'
                   }`}
@@ -340,9 +383,12 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
             {/* Group Filter & User Auth Button */}
             <div className="flex items-center gap-1.5 sm:gap-2">
               {/* Group Pill Selector */}
-              <div className="flex items-center p-0.5 bg-neutral-100 rounded-lg border border-neutral-200 text-xs overflow-x-auto max-w-[200px] sm:max-w-none">
+              <div className={`flex items-center p-0.5 bg-neutral-100 rounded-lg border border-neutral-200 text-xs overflow-x-auto max-w-[200px] sm:max-w-none ${
+                isExamInProgress ? 'opacity-50 pointer-events-none' : ''
+              }`}>
                 <button
                   type="button"
+                  disabled={isExamInProgress}
                   onClick={() => setSelectedGroupTab('all')}
                   className={`px-2 py-1 rounded-md transition-all font-medium shrink-0 ${
                     selectedGroupTab === 'all'
@@ -356,30 +402,42 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
                   <button
                     key={g.id}
                     type="button"
+                    disabled={isExamInProgress}
                     onClick={() => setSelectedGroupTab(g.id)}
                     className={`px-2 py-1 rounded-md transition-all font-medium shrink-0 ${
                       selectedGroupTab === g.id
-                        ? g.transmission === 'АКПП'
+                        ? g.category === 'C'
+                          ? 'bg-amber-600 text-white shadow-xs font-semibold'
+                          : g.transmission === 'АКПП'
                           ? 'bg-indigo-600 text-white shadow-xs font-semibold'
                           : 'bg-blue-600 text-white shadow-xs font-semibold'
                         : 'text-neutral-500 hover:text-neutral-900'
                     }`}
-                    title={`${g.name}: ${g.transmissionLabel}`}
+                    title={`${g.name}: ${g.categoryLabel || g.transmissionLabel}`}
                   >
-                    Гр. {g.number}
+                    Гр. {g.number} {g.category === 'C' ? '(C)' : ''}
                   </button>
                 ))}
               </div>
 
               {/* User / Admin pill button - Opens Auth Modal for login / switch / logout */}
               <button
-                onClick={() => setIsAuthOpen(true)}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-medium transition-all cursor-pointer ${
-                  isAdmin
-                    ? 'border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100'
+                disabled={isExamInProgress}
+                onClick={() => {
+                  if (isExamInProgress) {
+                    alert('Во время сдачи государственного экзамена выход и смена аккаунта заблокированы!');
+                    return;
+                  }
+                  setIsAuthOpen(true);
+                }}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-medium transition-all ${
+                  isExamInProgress
+                    ? 'border-neutral-200 bg-neutral-100 text-neutral-400 opacity-60 cursor-not-allowed'
+                    : isAdmin
+                    ? 'border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 cursor-pointer'
                     : currentUser && currentUser.name
-                    ? 'border-blue-300 bg-blue-50 text-blue-900 font-semibold hover:bg-blue-100'
-                    : 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700 shadow-xs'
+                    ? 'border-blue-300 bg-blue-50 text-blue-900 font-semibold hover:bg-blue-100 cursor-pointer'
+                    : 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700 shadow-xs cursor-pointer'
                 }`}
                 title={
                   isAdmin

@@ -15,6 +15,8 @@ import { Footer } from './components/Footer';
 import { DesignInspector } from './components/DesignInspector';
 import { AuthModal } from './components/AuthModal';
 import { StudentManagementModal } from './components/StudentManagementModal';
+import { AuthGateScreen } from './components/AuthGateScreen';
+import { LoginSuccessLoading } from './components/LoginSuccessLoading';
 import { ShieldCheck, Car, Lock, AlertTriangle, Users } from 'lucide-react';
 
 function AppContent() {
@@ -22,13 +24,61 @@ function AppContent() {
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authDefaultTab, setAuthDefaultTab] = useState<'student' | 'admin'>('student');
   const [studentModalOpen, setStudentModalOpen] = useState(false);
-  const { currentUser, isAdmin, adminCredentials, groups, canAccessTab } = useApp();
+
+  // Entrance gate and login animation state
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [loginUserData, setLoginUserData] = useState<{ userName: string; role: 'student' | 'admin' } | null>(null);
+
+  const { currentUser, isAdmin, adminCredentials, groups, canAccessTab, isExamInProgress } = useApp();
   const { setActivePageKey } = useDesignEditor();
+
+  // If exam is in progress, ensure user remains strictly in tests tab
+  useEffect(() => {
+    if (isExamInProgress && activeTab !== 'tests') {
+      setActiveTab('tests');
+    }
+  }, [isExamInProgress, activeTab]);
+
+  const handleTabChange = (newTab: string) => {
+    if (isExamInProgress && newTab !== 'tests') {
+      alert('Во время сдачи государственного экзамена переход в другие вкладки отключен для предотвращения списывания!');
+      return;
+    }
+    setActiveTab(newTab);
+  };
 
   // Sync active page with design editor
   useEffect(() => {
     setActivePageKey(activeTab);
   }, [activeTab, setActivePageKey]);
+
+  // Mandatory Authentication: Only student or admin can access the site
+  const isAuthenticated = Boolean(
+    currentUser &&
+      (currentUser.isAdmin || (currentUser.name && currentUser.name.trim() !== '')) &&
+      !currentUser.id.startsWith('guest-')
+  );
+
+  const handleLoginSuccess = (userName: string, role: 'student' | 'admin') => {
+    setLoginUserData({ userName, role });
+    setIsLoggingIn(true);
+  };
+
+  // If currently showing post-login loading animation
+  if (isLoggingIn && loginUserData) {
+    return (
+      <LoginSuccessLoading
+        userName={loginUserData.userName}
+        role={loginUserData.role}
+        onFinished={() => setIsLoggingIn(false)}
+      />
+    );
+  }
+
+  // If user is not authenticated: strictly display only the entrance gate
+  if (!isAuthenticated) {
+    return <AuthGateScreen onLoginSuccess={handleLoginSuccess} />;
+  }
 
   // If current tab is restricted for student, automatically suggest switching to an allowed one
   const hasAccessToCurrentTab = canAccessTab(activeTab);
@@ -36,7 +86,7 @@ function AppContent() {
   return (
     <div className="min-h-screen bg-neutral-50 text-neutral-900 flex flex-col font-sans selection:bg-blue-600 selection:text-white">
       {/* Top Navigation */}
-      <Navbar activeTab={activeTab} setActiveTab={setActiveTab} />
+      <Navbar activeTab={activeTab} setActiveTab={handleTabChange} />
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-3.5 sm:px-6 py-5 sm:py-7 pb-24 md:pb-12">
@@ -53,14 +103,14 @@ function AppContent() {
             </div>
             <div className="pt-2 flex flex-wrap items-center justify-center gap-2">
               <button
-                onClick={() => setActiveTab('rules')}
+                onClick={() => handleTabChange('rules')}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold transition-colors"
               >
                 Перейти в Правила и знаки
               </button>
               {canAccessTab('tests') && (
                 <button
-                  onClick={() => setActiveTab('tests')}
+                  onClick={() => handleTabChange('tests')}
                   className="px-4 py-2 bg-neutral-900 hover:bg-neutral-800 text-white rounded-xl text-xs font-semibold transition-colors"
                 >
                   Перейти в Тесты
@@ -82,7 +132,7 @@ function AppContent() {
                   setAuthDefaultTab(tab || 'student');
                   setAuthModalOpen(true);
                 }}
-                onNavigateToTab={(tab) => setActiveTab(tab)}
+                onNavigateToTab={(tab) => handleTabChange(tab)}
                 onOpenStudentModal={() => setStudentModalOpen(true)}
               />
             )}
@@ -91,21 +141,23 @@ function AppContent() {
         )}
       </main>
 
-      {/* Floating Design Inspector for Admin */}
-      <DesignInspector />
+      {/* Floating Design Inspector for Admin (hidden during active exam) */}
+      {!isExamInProgress && <DesignInspector />}
 
-      {/* Full Customizable Footer with Email, Phone, Theme Switcher & Admin Controls */}
-      <Footer
-        onOpenAuth={(tab) => {
-          setAuthDefaultTab(tab);
-          setAuthModalOpen(true);
-        }}
-        onOpenStudentModal={() => setStudentModalOpen(true)}
-        onNavigateToTab={(tab) => setActiveTab(tab)}
-      />
+      {/* Full Customizable Footer with Email, Phone, Theme Switcher & Admin Controls (hidden during active exam to lock down the interface) */}
+      {!isExamInProgress && (
+        <Footer
+          onOpenAuth={(tab) => {
+            setAuthDefaultTab(tab);
+            setAuthModalOpen(true);
+          }}
+          onOpenStudentModal={() => setStudentModalOpen(true)}
+          onNavigateToTab={(tab) => handleTabChange(tab)}
+        />
+      )}
 
-      {/* Mobile Bottom Thumb Navigation */}
-      <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} />
+      {/* Mobile Bottom Thumb Navigation (hidden during active exam to prevent cheating) */}
+      {!isExamInProgress && <BottomNav activeTab={activeTab} setActiveTab={handleTabChange} />}
 
       {/* Auth Modal */}
       <AuthModal

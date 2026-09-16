@@ -191,10 +191,8 @@ export const ScheduleInfoView: React.FC = () => {
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-blue-50 text-blue-800 border border-blue-100">
                         {item.group === 'all'
-                          ? 'Общее (Гр. 7 и 8)'
-                          : item.group === 'group7_mkpp'
-                          ? 'Группа №7 (МКПП)'
-                          : 'Группа №8 (АКПП)'}
+                          ? 'Общее (все группы)'
+                          : getGroupName(item.group)}
                       </span>
 
                       {isAdmin && (
@@ -267,15 +265,15 @@ export const ScheduleInfoView: React.FC = () => {
                   <div className="space-y-2.5">
                     <div className="flex items-center justify-between">
                       <span
-                        className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded ${
-                          item.group === 'group7_mkpp'
-                            ? 'bg-blue-100 text-blue-900'
-                            : 'bg-indigo-100 text-indigo-900'
+                        className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${
+                          item.group === 'group3_c'
+                            ? 'bg-amber-100 text-amber-900 border-amber-200'
+                            : item.group === 'group8_akpp'
+                            ? 'bg-indigo-100 text-indigo-900 border-indigo-200'
+                            : 'bg-blue-100 text-blue-900 border-blue-200'
                         }`}
                       >
-                        {item.group === 'group7_mkpp'
-                          ? 'МКПП • Группа №7'
-                          : 'АКПП • Группа №8'}
+                        {item.group === 'all' ? 'Все группы' : getGroupName(item.group)}
                       </span>
 
                       {isAdmin && (
@@ -480,7 +478,7 @@ export const ScheduleInfoView: React.FC = () => {
                     <option value="all">Для всех групп</option>
                     {groups.map((g) => (
                       <option key={g.id} value={g.id}>
-                        {g.name} ({g.transmission})
+                        {g.name} ({g.category === 'C' ? 'Кат. C' : g.transmission})
                       </option>
                     ))}
                   </select>

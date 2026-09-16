@@ -21,6 +21,10 @@ import {
   FileText,
   Clock,
   ArrowRight,
+  UserPlus,
+  Check,
+  Trash2,
+  Copy,
 } from 'lucide-react';
 
 interface StudentProfileViewProps {
@@ -47,7 +51,26 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
     canStudentTakeTests,
     canStudentTakeExam,
     logout,
+    accessRequests,
+    approveAccessRequest,
+    rejectAccessRequest,
+    deleteAccessRequest,
+    getGroupName,
   } = useApp();
+
+  // Requests state
+  const [requestsFilter, setRequestsFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
+  const [requestFeedback, setRequestFeedback] = useState<{ id: string; message: string; type: 'success' | 'error' } | null>(null);
+  const [copiedLoginId, setCopiedLoginId] = useState<string | null>(null);
+
+  const pendingRequestsCount = accessRequests.filter((r) => r.status === 'pending').length;
+  const approvedRequestsCount = accessRequests.filter((r) => r.status === 'approved').length;
+  const rejectedRequestsCount = accessRequests.filter((r) => r.status === 'rejected').length;
+
+  const filteredRequests = accessRequests.filter((r) => {
+    if (requestsFilter === 'all') return true;
+    return r.status === requestsFilter;
+  });
 
   // Find the current logged in student account if available
   const currentStudentAccount = students.find(
@@ -213,7 +236,7 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
         </div>
 
         {/* Quick Stats Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
           <div className="bg-white p-4 rounded-2xl border border-neutral-200 shadow-2xs">
             <div className="flex items-center justify-between text-neutral-500 text-xs mb-1">
               <span>Курсантов в базе</span>
@@ -232,6 +255,29 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
             <span className="text-[11px] text-neutral-400">МКПП и АКПП</span>
           </div>
 
+          {/* Задача 3: Счётчик заявок со статусом pending (красный бейдж) */}
+          <div className="bg-white p-4 rounded-2xl border border-neutral-200 shadow-2xs relative overflow-hidden">
+            <div className="flex items-center justify-between text-neutral-500 text-xs mb-1">
+              <span>Заявки на доступ</span>
+              <UserPlus className="w-4 h-4 text-rose-600" />
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="text-xl sm:text-2xl font-black text-neutral-900">
+                {accessRequests.length}
+              </div>
+              {accessRequests.filter((r) => r.status === 'pending').length > 0 && (
+                <span className="px-2 py-0.5 rounded-full text-[11px] font-black bg-red-600 text-white shadow-xs animate-pulse">
+                  +{accessRequests.filter((r) => r.status === 'pending').length} новых
+                </span>
+              )}
+            </div>
+            <span className="text-[11px] text-neutral-500">
+              {accessRequests.filter((r) => r.status === 'pending').length > 0
+                ? 'Требуют решения'
+                : 'Все обработаны'}
+            </span>
+          </div>
+
           <div className="bg-white p-4 rounded-2xl border border-neutral-200 shadow-2xs">
             <div className="flex items-center justify-between text-neutral-500 text-xs mb-1">
               <span>Записей в ЛОГИ</span>
@@ -241,7 +287,7 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
             <span className="text-[11px] text-amber-700 font-medium">Журнал аудита</span>
           </div>
 
-          <div className="bg-white p-4 rounded-2xl border border-neutral-200 shadow-2xs">
+          <div className="bg-white p-4 rounded-2xl border border-neutral-200 shadow-2xs col-span-2 sm:col-span-1">
             <div className="flex items-center justify-between text-neutral-500 text-xs mb-1">
               <span>Статус безопасности</span>
               <ShieldCheck className="w-4 h-4 text-emerald-600" />
@@ -445,6 +491,279 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
               </form>
             </div>
           </div>
+        </div>
+
+        {/* ================= ЗАДАЧА 3: ЗАЯВКИ У АДМИНИСТРАТОРА ================= */}
+        <div className="bg-white p-6 rounded-3xl border border-neutral-200 shadow-xs space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-neutral-100">
+            <div>
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center border border-rose-200 shrink-0">
+                  <UserPlus className="w-4 h-4" />
+                </div>
+                <h2 className="text-base font-bold text-neutral-900">
+                  Заявки на доступ и регистрацию
+                </h2>
+                {pendingRequestsCount > 0 ? (
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-red-600 text-white flex items-center gap-1.5 animate-pulse">
+                    <span className="w-1.5 h-1.5 rounded-full bg-white" />
+                    <span>{pendingRequestsCount} ожидают решения</span>
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-neutral-100 text-neutral-600">
+                    Все заявки обработаны
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-neutral-500 mt-1">
+                Курсанты, отправившие запрос через экран входа. При нажатии «Одобрить» генерируется логин (kursant_XXXX) и создаётся учётная запись в базе.
+              </p>
+            </div>
+
+            {/* Filter Tabs */}
+            <div className="flex items-center gap-1 bg-neutral-100 p-1 rounded-xl shrink-0 self-start sm:self-auto text-xs">
+              <button
+                type="button"
+                onClick={() => setRequestsFilter('pending')}
+                className={`px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  requestsFilter === 'pending'
+                    ? 'bg-white text-neutral-900 shadow-xs'
+                    : 'text-neutral-500 hover:text-neutral-800'
+                }`}
+              >
+                <span>Ожидают</span>
+                {pendingRequestsCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-red-600 text-white">
+                    {pendingRequestsCount}
+                  </span>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setRequestsFilter('approved')}
+                className={`px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${
+                  requestsFilter === 'approved'
+                    ? 'bg-white text-neutral-900 shadow-xs'
+                    : 'text-neutral-500 hover:text-neutral-800'
+                }`}
+              >
+                <span>Одобренные ({approvedRequestsCount})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setRequestsFilter('rejected')}
+                className={`px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${
+                  requestsFilter === 'rejected'
+                    ? 'bg-white text-neutral-900 shadow-xs'
+                    : 'text-neutral-500 hover:text-neutral-800'
+                }`}
+              >
+                <span>Отклонённые ({rejectedRequestsCount})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setRequestsFilter('all')}
+                className={`px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${
+                  requestsFilter === 'all'
+                    ? 'bg-white text-neutral-900 shadow-xs'
+                    : 'text-neutral-500 hover:text-neutral-800'
+                }`}
+              >
+                <span>Все ({accessRequests.length})</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Feedback message */}
+          {requestFeedback && (
+            <div
+              className={`p-3 rounded-xl text-xs flex items-center justify-between gap-2 animate-in fade-in ${
+                requestFeedback.type === 'success'
+                  ? 'bg-emerald-50 border border-emerald-200 text-emerald-800'
+                  : 'bg-red-50 border border-red-200 text-red-800'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                {requestFeedback.type === 'success' ? (
+                  <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                )}
+                <span>{requestFeedback.message}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRequestFeedback(null)}
+                className="text-neutral-400 hover:text-neutral-600 text-[11px] underline cursor-pointer"
+              >
+                Закрыть
+              </button>
+            </div>
+          )}
+
+          {/* Requests List */}
+          {filteredRequests.length === 0 ? (
+            <div className="py-10 text-center text-neutral-400 text-xs bg-neutral-50/60 rounded-2xl border border-dashed border-neutral-200">
+              <UserPlus className="w-8 h-8 mx-auto text-neutral-300 mb-2" />
+              <p className="font-semibold text-neutral-600">Заявок в этой категории нет</p>
+              <p className="text-[11px] text-neutral-400 mt-0.5">
+                Новые заявки от курсантов будут отображаться здесь со статусом «pending».
+              </p>
+            </div>
+          ) : (
+            <div className="divide-y divide-neutral-100">
+              {filteredRequests.map((req) => {
+                const isPending = req.status === 'pending';
+                const isApproved = req.status === 'approved';
+                const isRejected = req.status === 'rejected';
+
+                return (
+                  <div
+                    key={req.id}
+                    className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 group transition-colors hover:bg-neutral-50/70 px-3 rounded-xl"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div
+                        className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm shrink-0 border ${
+                          isPending
+                            ? 'bg-amber-50 text-amber-800 border-amber-200'
+                            : isApproved
+                            ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                            : 'bg-neutral-100 text-neutral-600 border-neutral-200'
+                        }`}
+                      >
+                        {req.lastName.charAt(0)}
+                        {req.firstName.charAt(0)}
+                      </div>
+
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-sm text-neutral-900">
+                            {req.lastName} {req.firstName}
+                          </span>
+
+                          {/* Status Badge */}
+                          {isPending && (
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                              На рассмотрении (pending)
+                            </span>
+                          )}
+                          {isApproved && (
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 text-emerald-900 border border-emerald-300 flex items-center gap-1">
+                              <Check className="w-3 h-3" />
+                              <span>Одобрена</span>
+                            </span>
+                          )}
+                          {isRejected && (
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-medium bg-neutral-100 text-neutral-600 border border-neutral-200">
+                              Отклонена
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2.5 text-xs text-neutral-500 mt-1 flex-wrap">
+                          <span>
+                            Группа: <strong className="text-neutral-700">{getGroupName(req.group || '')}</strong>
+                          </span>
+                          <span>•</span>
+                          <span>
+                            Подана: {new Date(req.createdAt).toLocaleDateString('ru-RU')} в{' '}
+                            {new Date(req.createdAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+
+                        {/* If approved, show issued login */}
+                        {isApproved && req.approvedLogin && (
+                          <div className="mt-1.5 flex items-center gap-2 text-xs">
+                            <span className="text-neutral-500">Назначенный логин:</span>
+                            <span className="px-2 py-0.5 rounded-md bg-blue-50 border border-blue-200 text-blue-700 font-mono font-bold text-xs">
+                              {req.approvedLogin}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard?.writeText(req.approvedLogin || '');
+                                setCopiedLoginId(req.id);
+                                setTimeout(() => setCopiedLoginId(null), 2000);
+                              }}
+                              className="text-[11px] text-neutral-400 hover:text-blue-600 inline-flex items-center gap-1 cursor-pointer"
+                            >
+                              {copiedLoginId === req.id ? (
+                                <span className="text-emerald-600 font-semibold">Скопировано!</span>
+                              ) : (
+                                <>
+                                  <Copy className="w-3 h-3" />
+                                  <span>Копировать</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                      {isPending && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const res = approveAccessRequest(req.id);
+                              if (res.success) {
+                                setRequestFeedback({
+                                  id: req.id,
+                                  message: `Заявка для ${req.lastName} ${req.firstName} успешно одобрена! Сгенерирован логин: ${res.login}. Курсант создан в базе.`,
+                                  type: 'success',
+                                });
+                              } else {
+                                setRequestFeedback({
+                                  id: req.id,
+                                  message: res.error || 'Не удалось одобрить заявку',
+                                  type: 'error',
+                                });
+                              }
+                            }}
+                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            <span>Одобрить</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              rejectAccessRequest(req.id);
+                              setRequestFeedback({
+                                id: req.id,
+                                message: `Заявка для ${req.lastName} ${req.firstName} отклонена.`,
+                                type: 'success',
+                              });
+                            }}
+                            className="px-3 py-1.5 bg-neutral-100 hover:bg-rose-50 text-neutral-700 hover:text-rose-700 border border-neutral-200 hover:border-rose-200 font-semibold text-xs rounded-xl transition-colors cursor-pointer"
+                          >
+                            <span>Отклонить</span>
+                          </button>
+                        </>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => deleteAccessRequest(req.id)}
+                        title="Удалить из архива"
+                        className="p-1.5 text-neutral-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     );

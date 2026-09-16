@@ -23,7 +23,7 @@ export const SiteInfoView: React.FC = () => {
 
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState({
-    version: siteInfo.version || 'v0.04',
+    version: siteInfo.version || 'v0.06',
     developer: 'Мельник Сергей (SelJax)',
     schoolName: siteInfo.schoolName || 'Автошкола ДОСААФ',
     description: siteInfo.description || '',
@@ -113,7 +113,7 @@ export const SiteInfoView: React.FC = () => {
                     required
                     value={formData.version}
                     onChange={(e) => setFormData({ ...formData, version: e.target.value })}
-                    placeholder="v0.04"
+                    placeholder="v0.06"
                     className="w-full px-3 py-2 border rounded-xl"
                   />
                 </div>

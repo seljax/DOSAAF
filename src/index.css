@@ -1,5 +1,29 @@
 @import "tailwindcss";
 
+:root {
+  --portal-bg: #111113;
+  --portal-ink: #f2efeb;
+  --portal-accent: #f59e0b;
+  --portal-surface: #1a1a1c;
+  --portal-border: rgba(242, 239, 235, 0.1);
+}
+
+.font-oswald {
+  font-family: 'Oswald', sans-serif;
+}
+
+.font-jetbrains {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.portal-grid-bg {
+  background-color: #111113;
+  background-image: 
+    linear-gradient(rgba(242, 239, 235, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(242, 239, 235, 0.08) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
 :root[data-theme="dark"] body,
 body.dark {
   background-color: #0f172a;
@@ -81,3 +105,24 @@ body.dark {
   background-color: #13274f !important;
   color: #f1f5f9 !important;
 }
+
+/* Anti-copying & Anti-cheating for tests and exams */
+.exam-anti-copy,
+.exam-anti-copy *,
+.test-anti-copy,
+.test-anti-copy * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -moz-user-select: none !important;
+  -ms-user-select: none !important;
+  -webkit-touch-callout: none !important;
+}
+
+/* Prevent image dragging and context menu during test/exam */
+.exam-anti-copy img,
+.test-anti-copy img {
+  pointer-events: none;
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
