@@ -30,6 +30,10 @@ export interface StudentAccount {
   };
   canTakeTests: boolean;
   canTakeExam: boolean;
+  examAttemptsAllowed?: number; // total attempts allowed by admin (default: 1)
+  examAttemptsUsed?: number; // attempts already taken (default: 0)
+  examPassed?: boolean; // whether student has successfully passed the exam
+  assignedExamTicket?: number | 'free_choice'; // assigned specific ticket (1..40) or student free choice
   notes?: string;
   createdAt: number;
   lastLoginAt?: number;
@@ -71,6 +75,10 @@ export interface User {
   };
   canTakeTests?: boolean;
   canTakeExam?: boolean;
+  examAttemptsAllowed?: number;
+  examAttemptsUsed?: number;
+  examPassed?: boolean;
+  assignedExamTicket?: number | 'free_choice';
 }
 
 export type SignCategory =
@@ -127,6 +135,7 @@ export interface Question {
   categoryType?: 'all' | 'B' | 'C' | 'BC'; // Target vehicle category
   difficulty?: 'easy' | 'medium' | 'hard';
   includeInExam?: boolean; // whether this question is in the GIBDD/DOSAAF exam pool
+  ticketNumber?: number; // 1, 2, 3, etc.
 }
 
 export interface TestAttempt {
@@ -145,6 +154,7 @@ export interface TestAttempt {
   dateStr: string;
   wrongQuestionIds: string[];
   isExam?: boolean;
+  ticketNumber?: number | 'random';
   abandoned?: boolean; // true if student started and closed/exited without completing
   answeredCount?: number;
 }
@@ -202,12 +212,25 @@ export interface LearningMaterial {
   dateAdded: string;
 }
 
+export interface OccupiedTicket {
+  ticketNumber: number;
+  studentId: string;
+  studentName: string;
+  timestamp: number;
+}
+
 export interface ExamSettings {
   isOpen: boolean; // open for students or closed by instructor
   questionCount: number; // e.g. 20 questions
   timeLimitMinutes: number; // e.g. 20 min (0 = unlimited)
   testTimeLimitMinutes: number; // for category tests (e.g. 15 min, 0 = unlimited)
   passingPercent: number; // e.g. 90%
+  defaultAllowedAttempts?: number; // default number of attempts per student (default: 1)
+  totalTickets?: number; // Maximum up to 40 tickets (default: 40)
+  showImmediateFeedback?: boolean; // If false (default), right/wrong answers and explanations shown only at end of exam
+  allowQuestionNavigation?: boolean; // If false (default), switching between questions during exam is forbidden
+  uniqueTicketPerStudent?: boolean; // If true (default), when a student picks a ticket, other students cannot pick it
+  occupiedTickets?: OccupiedTicket[]; // List of currently active/occupied tickets
 }
 
 export type PageThemeColor =

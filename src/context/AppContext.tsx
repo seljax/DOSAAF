@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import {
   User, RoadSign, RoadRule, QuestionCategory, Question, CompletedLesson,
   ScheduleItem, TestAttempt, GroupType, GroupConfig, LearningMaterial,
@@ -58,23 +58,31 @@ function useSyncedState<T>(
     return initialValue;
   });
 
-  // При получении данных с сервера — обновить state
+  // Синхронизация с сервером — ТОЛЬКО ОДИН РАЗ при первой загрузке serverData
+  const syncedRef = useRef(false);
   useEffect(() => {
+    if (syncedRef.current) return;
     if (serverData[key] !== undefined) {
       setState(serverData[key] as T);
     }
-  }, [serverData[key]]);
+    if (Object.keys(serverData).length > 0) {
+      syncedRef.current = true;
+    }
+  }, [serverData, key]);
 
-  const setAndSave = useCallback((value: T | ((prev: T) => T)) => {
-    setState((prev) => {
-      const next = typeof value === 'function' ? (value as (p: T) => T)(prev) : value;
-      saveToServer(key, next);
-      try {
-        localStorage.setItem(`avtoshkola_${key}_v2`, JSON.stringify(next));
-      } catch {}
-      return next;
-    });
-  }, [key]);
+  const setAndSave = useCallback(
+    (value: T | ((prev: T) => T)) => {
+      setState((prev) => {
+        const next = typeof value === 'function' ? (value as (p: T) => T)(prev) : value;
+        saveToServer(key, next);
+        try {
+          localStorage.setItem(`avtoshkola_${key}_v2`, JSON.stringify(next));
+        } catch {}
+        return next;
+      });
+    },
+    [key]
+  );
 
   return [state, setAndSave];
 }
@@ -98,6 +106,8 @@ interface AppContextType {
   toggleStudentTabAccess: (id: string, tab: keyof StudentAccount['allowedTabs']) => void;
   toggleStudentTestAccess: (id: string, canTakeTests: boolean) => void;
   toggleStudentExamAccess: (id: string, canTakeExam: boolean) => void;
+  resetStudentExamAttempts: (id: string) => void;
+  setStudentExamAttempts: (id: string, attemptsAllowed: number, resetUsed?: boolean) => void;
   loginStudentWithPassword: (loginOrName: string, password: string) => { success: boolean; error?: string };
   changeStudentPassword: (oldPass: string, newPass: string) => { success: boolean; error?: string };
   canAccessTab: (tabId: string) => boolean;
@@ -124,6 +134,8 @@ interface AppContextType {
   resetSiteInfo: () => void;
   appTheme: AppTheme;
   setAppTheme: (theme: AppTheme) => void;
+  isGroupModalOpen: boolean;
+  setIsGroupModalOpen: (open: boolean) => void;
   groups: GroupConfig[];
   addGroup: (group: Omit<GroupConfig, 'id'>) => void;
   updateGroup: (id: string, updates: Partial<GroupConfig>) => void;
@@ -147,6 +159,8 @@ interface AppContextType {
   deleteQuestion: (id: string) => void;
   toggleQuestionExamInclusion: (id: string, include?: boolean) => void;
   batchSetQuestionsExamInclusion: (questionIds: string[], include: boolean) => void;
+  batchAssignQuestionsToTicket: (questionIds: string[], ticketNumber?: number) => void;
+  distributeQuestionsAcrossTickets: (totalTickets: number) => void;
   isExamInProgress: boolean;
   setIsExamInProgress: (inProgress: boolean) => void;
   lessons: CompletedLesson[];
@@ -170,7 +184,6 @@ interface AppContextType {
   resetToDefaults: () => void;
   exportDataJson: () => string;
   importDataJson: (json: string) => { success: boolean; error?: string };
-  // Заявки на доступ
   accessRequests: AccessRequest[];
   submitAccessRequest: (reqData: { firstName: string; lastName: string; password: string; group?: string }) => AccessRequest;
   approveAccessRequest: (requestId: string) => { success: boolean; login?: string; error?: string };
@@ -185,7 +198,6 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [serverData, setServerData] = useState<Record<string, any>>({});
 
-  // Загрузка с сервера при старте
   useEffect(() => {
     loadAllFromServer().then((data) => setServerData(data));
   }, []);
@@ -246,13 +258,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [siteInfo, setSiteInfo] = useSyncedState<SiteInfoSettings>('siteInfo', INITIAL_SITE_INFO, serverData);
   const [appTheme, setAppThemeState] = useSyncedState<AppTheme>('appTheme', 'light', serverData);
   const [accessRequests, setAccessRequests] = useSyncedState<AccessRequest[]>('access_requests', INITIAL_ACCESS_REQUESTS, serverData);
+  const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
 
-  // Password reset session (только в памяти)
   const [passwordResetSession, setPasswordResetSession] = useState<{
     code: string; email: string; expiresAt: number;
   } | null>(null);
 
-  // Применение темы
   useEffect(() => {
     const root = document.documentElement;
     root.classList.remove('dark', 'theme-dosaaf-navy');
@@ -321,6 +332,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       fullName,
       login: studentData.login.trim() || `kursant_${Date.now().toString().slice(-4)}`,
       password: studentData.password.trim(),
+      canTakeTests: studentData.canTakeTests ?? true,
+      canTakeExam: studentData.canTakeExam ?? true,
+      examAttemptsAllowed: studentData.examAttemptsAllowed ?? examSettings.defaultAllowedAttempts ?? 1,
+      examAttemptsUsed: studentData.examAttemptsUsed ?? 0,
       createdAt: Date.now(),
     };
     setStudents((prev) => [newStudent, ...prev]);
@@ -341,8 +356,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       })
     );
 
-    // Если текущий пользователь — этот курсант, обновить его сессию
-    if (currentUser?.studentId === id) {
+    if (currentUser?.studentId === id || currentUser?.id === id) {
       setCurrentUser((prev) => {
         if (!prev) return null;
         return {
@@ -352,6 +366,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           allowedTabs: updates.allowedTabs || prev.allowedTabs,
           canTakeTests: updates.canTakeTests !== undefined ? updates.canTakeTests : prev.canTakeTests,
           canTakeExam: updates.canTakeExam !== undefined ? updates.canTakeExam : prev.canTakeExam,
+          examAttemptsAllowed: updates.examAttemptsAllowed !== undefined ? updates.examAttemptsAllowed : prev.examAttemptsAllowed,
+          examAttemptsUsed: updates.examAttemptsUsed !== undefined ? updates.examAttemptsUsed : prev.examAttemptsUsed,
+          examPassed: updates.examPassed !== undefined ? updates.examPassed : prev.examPassed,
+          assignedExamTicket: updates.assignedExamTicket !== undefined ? updates.assignedExamTicket : prev.assignedExamTicket,
         };
       });
     }
@@ -371,7 +389,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const toggleStudentTestAccess = (id: string, canTakeTests: boolean) => updateStudent(id, { canTakeTests });
-  const toggleStudentExamAccess = (id: string, canTakeExam: boolean) => updateStudent(id, { canTakeExam });
+
+  const toggleStudentExamAccess = (id: string, canTakeExam: boolean) => {
+    const student = students.find((s) => s.id === id);
+    if (!student) return;
+    if (canTakeExam) {
+      const allowed = student.examAttemptsAllowed ?? 1;
+      const used = student.examAttemptsUsed ?? 0;
+      if (used >= allowed) {
+        updateStudent(id, { canTakeExam: true, examAttemptsUsed: Math.max(0, allowed - 1) });
+      } else {
+        updateStudent(id, { canTakeExam: true });
+      }
+    } else {
+      updateStudent(id, { canTakeExam: false });
+    }
+  };
+
+  const resetStudentExamAttempts = (id: string) => {
+    updateStudent(id, { examAttemptsUsed: 0, canTakeExam: true });
+  };
+
+  const setStudentExamAttempts = (id: string, attemptsAllowed: number, resetUsed: boolean = false) => {
+    updateStudent(id, {
+      examAttemptsAllowed: Math.max(1, attemptsAllowed),
+      ...(resetUsed ? { examAttemptsUsed: 0, canTakeExam: true } : {}),
+    });
+  };
 
   const loginStudentWithPassword = (loginOrName: string, pass: string) => {
     const q = loginOrName.trim().toLowerCase();
@@ -407,6 +451,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       allowedTabs: matched.allowedTabs,
       canTakeTests: matched.canTakeTests,
       canTakeExam: matched.canTakeExam,
+      examAttemptsAllowed: matched.examAttemptsAllowed ?? 1,
+      examAttemptsUsed: matched.examAttemptsUsed ?? 0,
+      examPassed: matched.examPassed,
+      assignedExamTicket: matched.assignedExamTicket,
     });
 
     setSelectedGroupTab(matched.group);
@@ -466,9 +514,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const canStudentTakeExam = (): boolean => {
     if (currentUser?.isAdmin) return true;
-    if (!examSettings.isOpen) return false;
-    if (currentUser?.canTakeExam !== undefined) return currentUser.canTakeExam;
-    return true;
+    if (!currentUser) return false;
+
+    const student = students.find(
+      (s) => s.id === currentUser.id || s.login === currentUser.login || s.fullName === currentUser.name
+    );
+
+    if (student) {
+      if (!student.canTakeExam) return false;
+      const allowed = student.examAttemptsAllowed ?? 1;
+      const used = student.examAttemptsUsed ?? 0;
+      return used < allowed;
+    }
+
+    if (currentUser.canTakeExam === false) return false;
+    const allowed = currentUser.examAttemptsAllowed ?? 1;
+    const used = currentUser.examAttemptsUsed ?? 0;
+    return used < allowed;
   };
 
   const updateAdminCredentials = (oldPass: string, newLogin: string, newPass: string) => {
@@ -681,7 +743,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setQuestions((prev) =>
       prev.map((q) => {
         if (q.id !== id) return q;
-        const newStatus = include !== undefined ? include : (q.includeInExam === false ? true : false);
+        const newStatus = include !== undefined ? include : q.includeInExam === false ? true : false;
         return { ...q, includeInExam: newStatus };
       })
     );
@@ -695,6 +757,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return { ...q, includeInExam: include };
       })
     );
+  };
+
+  const batchAssignQuestionsToTicket = (questionIds: string[], ticketNumber?: number) => {
+    const idSet = new Set(questionIds);
+    setQuestions((prev) =>
+      prev.map((q) => {
+        if (!idSet.has(q.id)) return q;
+        return { ...q, ticketNumber, includeInExam: true };
+      })
+    );
+  };
+
+  const distributeQuestionsAcrossTickets = (totalTickets: number) => {
+    const validCount = Math.max(1, Math.min(40, totalTickets || 40));
+    setQuestions((prev) => {
+      const examPool = prev.filter((q) => q.includeInExam !== false);
+      const otherPool = prev.filter((q) => q.includeInExam === false);
+      const updatedExamPool = examPool.map((q, idx) => ({
+        ...q,
+        ticketNumber: (idx % validCount) + 1,
+        includeInExam: true,
+      }));
+      return [...updatedExamPool, ...otherPool];
+    });
   };
 
   const addLesson = (lesson: Omit<CompletedLesson, 'id' | 'createdAt'>) =>
@@ -728,13 +814,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       { ...attempt, id: `att-${Date.now()}`, timestamp: Date.now(), dateStr },
       ...prev,
     ]);
+
+    if (attempt.isExam) {
+      const isPassed = attempt.scorePercent >= (examSettings.passingPercent || 90);
+      setStudents((prev) =>
+        prev.map((s) => {
+          if (s.id === attempt.userId || s.login === attempt.userId || s.fullName === attempt.userName) {
+            const nextUsed = (s.examAttemptsUsed || 0) + 1;
+            return {
+              ...s,
+              examAttemptsUsed: nextUsed,
+              canTakeExam: false,
+              examPassed: isPassed ? true : s.examPassed,
+            };
+          }
+          return s;
+        })
+      );
+
+      if (currentUser && !currentUser.isAdmin) {
+        setCurrentUser((prev) => {
+          if (!prev) return null;
+          const nextUsed = (prev.examAttemptsUsed || 0) + 1;
+          return {
+            ...prev,
+            examAttemptsUsed: nextUsed,
+            canTakeExam: false,
+            examPassed: isPassed ? true : prev.examPassed,
+          };
+        });
+      }
+    }
+
     addActivityLog({
       userId: attempt.userId,
       userName: attempt.userName,
       userGroup: attempt.userGroup,
       userRole: currentUser?.isAdmin ? 'admin' : 'student',
       actionType: attempt.isExam ? 'exam_completed' : 'test_completed',
-      message: `${attempt.userName} завершил ${attempt.isExam ? 'экзамен' : `тест «${attempt.categoryTitle}»`} (${attempt.scorePercent}%)`,
+      message: `${attempt.userName} завершил ${
+        attempt.isExam ? 'гос. экзамен (доступ закрыт)' : `тест «${attempt.categoryTitle}»`
+      } (${attempt.scorePercent}%)`,
       details: `${attempt.correctAnswers} из ${attempt.totalQuestions} верно`,
     });
   };
@@ -843,7 +963,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!target) return { success: false, error: 'Заявка не найдена' };
     if (target.status === 'approved') return { success: false, error: 'Заявка уже одобрена' };
 
-    // Генерируем уникальный логин kursant_XXXX
     let generatedLogin = '';
     for (let attempts = 0; attempts < 100; attempts++) {
       const candidate = `kursant_${Math.floor(1000 + Math.random() * 9000)}`;
@@ -856,7 +975,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       generatedLogin = `kursant_${Date.now().toString().slice(-4)}`;
     }
 
-    // Создаём учетную запись курсанта
     const targetGroup = target.group || groups[0]?.id || 'group7_mkpp';
     const newStudent = addStudent({
       firstName: target.firstName,
@@ -877,7 +995,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       notes: `Заявка одобрена администратором ${new Date().toLocaleDateString('ru-RU')}`,
     });
 
-    // Помечаем заявку как approved с логином
     setAccessRequests((prev) =>
       prev.map((r) =>
         r.id === requestId
@@ -950,6 +1067,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         toggleStudentTabAccess,
         toggleStudentTestAccess,
         toggleStudentExamAccess,
+        resetStudentExamAttempts,
+        setStudentExamAttempts,
         loginStudentWithPassword,
         changeStudentPassword,
         canAccessTab,
@@ -976,6 +1095,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         resetSiteInfo,
         appTheme,
         setAppTheme,
+        isGroupModalOpen,
+        setIsGroupModalOpen,
         groups,
         addGroup,
         updateGroup,
@@ -999,6 +1120,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteQuestion,
         toggleQuestionExamInclusion,
         batchSetQuestionsExamInclusion,
+        batchAssignQuestionsToTicket,
+        distributeQuestionsAcrossTickets,
         isExamInProgress,
         setIsExamInProgress,
         lessons,

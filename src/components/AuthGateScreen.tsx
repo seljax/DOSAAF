@@ -139,12 +139,12 @@ export const AuthGateScreen: React.FC<AuthGateScreenProps> = ({ onLoginSuccess }
 
             {/* Mono label */}
             <span className="font-jetbrains text-[10px] uppercase tracking-[0.2em] text-[#f59e0b] mb-4 block">
-              // ДОСААФ РОССИИ
+              // ДОСААФ КАВАЛЕРОВО
             </span>
 
             {/* Main heading */}
             <h1 className="font-oswald text-4xl sm:text-5xl md:text-[3.15rem] uppercase font-bold text-[#f2efeb] leading-[1.05] tracking-tight mb-6">
-              Обучение<br />Водителей<br /><span className="text-[#f59e0b]">Кат. Б и С</span>
+              Обучение<br />Водителей<br /><span className="text-[#f59e0b]">Кат. B и C</span>
             </h1>
 
             {/* Description */}
@@ -155,7 +155,7 @@ export const AuthGateScreen: React.FC<AuthGateScreenProps> = ({ onLoginSuccess }
 
           {/* System info footer on left */}
           <div className="font-jetbrains text-[9px] uppercase tracking-widest text-[rgba(242,239,235,0.35)] flex justify-between mt-10 pt-6 border-t border-[rgba(242,239,235,0.06)]">
-            <span>Версия v0.06</span>
+            <span>Версия v.0.08</span>
             <span>Сборка 2026</span>
           </div>
         </aside>
@@ -510,8 +510,8 @@ export const AuthGateScreen: React.FC<AuthGateScreenProps> = ({ onLoginSuccess }
 
           {/* System info footer on right */}
           <div className="font-jetbrains text-[9px] uppercase tracking-widest text-[rgba(242,239,235,0.3)] flex justify-between mt-8 pt-4 border-t border-[rgba(242,239,235,0.06)]">
-            <span>Защищённый узел: ДОСААФ</span>
-            <span>Версия v0.06</span>
+            <span>Создатель: Мельник Сергей</span>
+            <span>Версия v.0.08</span>
           </div>
         </section>
       </div>

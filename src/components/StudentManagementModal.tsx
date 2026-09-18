@@ -22,6 +22,7 @@ import {
   Plus,
   RefreshCw,
   Copy,
+  Ticket,
 } from 'lucide-react';
 
 interface StudentManagementModalProps {
@@ -51,6 +52,7 @@ export const StudentManagementModal: React.FC<StudentManagementModalProps> = ({
     approveAccessRequest,
     rejectAccessRequest,
     deleteAccessRequest,
+    examSettings,
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<'students' | 'security' | 'requests'>(defaultTab);
@@ -89,6 +91,9 @@ export const StudentManagementModal: React.FC<StudentManagementModalProps> = ({
     scheduleAccess: true,
     canTakeTests: true,
     canTakeExam: false,
+    examAttemptsAllowed: 1,
+    examAttemptsUsed: 0,
+    assignedExamTicket: 'free_choice' as number | 'free_choice',
     notes: '',
   });
   const [showFormPassword, setShowFormPassword] = useState(false);
@@ -139,6 +144,9 @@ export const StudentManagementModal: React.FC<StudentManagementModalProps> = ({
       scheduleAccess: true,
       canTakeTests: true,
       canTakeExam: false,
+      examAttemptsAllowed: 1,
+      examAttemptsUsed: 0,
+      assignedExamTicket: 'free_choice',
       notes: '',
     });
   };
@@ -160,6 +168,9 @@ export const StudentManagementModal: React.FC<StudentManagementModalProps> = ({
       scheduleAccess: student.allowedTabs.schedule,
       canTakeTests: student.canTakeTests,
       canTakeExam: student.canTakeExam,
+      examAttemptsAllowed: student.examAttemptsAllowed ?? 1,
+      examAttemptsUsed: student.examAttemptsUsed ?? 0,
+      assignedExamTicket: student.assignedExamTicket ?? 'free_choice',
       notes: student.notes || '',
     });
   };
@@ -189,6 +200,9 @@ export const StudentManagementModal: React.FC<StudentManagementModalProps> = ({
       if (!login) login = `kursant_${Date.now().toString().slice(-4)}`;
     }
 
+    const attemptsAllowed = Math.max(1, Number(formData.examAttemptsAllowed) || 1);
+    const attemptsUsed = Math.max(0, Number(formData.examAttemptsUsed) || 0);
+
     if (editingStudentId) {
       // update
       updateStudent(editingStudentId, {
@@ -207,6 +221,9 @@ export const StudentManagementModal: React.FC<StudentManagementModalProps> = ({
         },
         canTakeTests: formData.canTakeTests,
         canTakeExam: formData.canTakeExam,
+        examAttemptsAllowed: attemptsAllowed,
+        examAttemptsUsed: attemptsUsed,
+        assignedExamTicket: formData.assignedExamTicket,
         notes: formData.notes.trim(),
       });
     } else {
@@ -227,6 +244,9 @@ export const StudentManagementModal: React.FC<StudentManagementModalProps> = ({
         },
         canTakeTests: formData.canTakeTests,
         canTakeExam: formData.canTakeExam,
+        examAttemptsAllowed: attemptsAllowed,
+        examAttemptsUsed: attemptsUsed,
+        assignedExamTicket: formData.assignedExamTicket,
         notes: formData.notes.trim(),
       });
     }
@@ -498,23 +518,81 @@ export const StudentManagementModal: React.FC<StudentManagementModalProps> = ({
                               <span>Тесты: {student.canTakeTests ? 'ВКЛ' : 'ВЫКЛ'}</span>
                             </button>
 
-                            {/* Exam toggle */}
-                            <button
-                              onClick={() => toggleStudentExamAccess(student.id, !student.canTakeExam)}
-                              className={`px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
-                                student.canTakeExam
-                                  ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100'
-                                  : 'bg-neutral-100 text-neutral-600 border border-neutral-200 hover:bg-neutral-200'
-                              }`}
-                              title="Разрешить или закрыть допуск к государственному экзамену ДОСААФ"
-                            >
-                              {student.canTakeExam ? (
-                                <Unlock className="w-3.5 h-3.5" />
-                              ) : (
-                                <Lock className="w-3.5 h-3.5" />
-                              )}
-                              <span>Экзамен: {student.canTakeExam ? 'ДОПУЩЕН' : 'ЗАКРЫТ'}</span>
-                            </button>
+                            {/* Exam toggle & attempts */}
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <button
+                                onClick={() => toggleStudentExamAccess(student.id, !student.canTakeExam)}
+                                className={`px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
+                                  student.canTakeExam
+                                    ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100'
+                                    : 'bg-neutral-100 text-neutral-600 border border-neutral-200 hover:bg-neutral-200'
+                                }`}
+                                title="Разрешить или закрыть допуск к государственному экзамену ДОСААФ"
+                              >
+                                {student.canTakeExam ? (
+                                  <Unlock className="w-3.5 h-3.5 text-indigo-600" />
+                                ) : (
+                                  <Lock className="w-3.5 h-3.5 text-neutral-500" />
+                                )}
+                                <span>Экзамен: {student.canTakeExam ? 'ДОПУЩЕН' : 'ЗАКРЫТ'}</span>
+                              </button>
+
+                              {/* Attempts badge with quick +1 and reset */}
+                              <div
+                                className={`px-2 py-1 rounded-xl text-[11px] font-semibold border flex items-center gap-1.5 ${
+                                  (student.examAttemptsUsed ?? 0) >= (student.examAttemptsAllowed ?? 1)
+                                    ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                    : 'bg-amber-50 text-amber-800 border-amber-200'
+                                }`}
+                                title={`Использовано: ${student.examAttemptsUsed ?? 0} из ${student.examAttemptsAllowed ?? 1}`}
+                              >
+                                <span>
+                                  Попытки: <strong>{student.examAttemptsUsed ?? 0}</strong>/{student.examAttemptsAllowed ?? 1}
+                                </span>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    updateStudent(student.id, {
+                                      examAttemptsAllowed: (student.examAttemptsAllowed ?? 1) + 1,
+                                      canTakeExam: true,
+                                    });
+                                  }}
+                                  className="px-1.5 py-0.5 bg-white rounded border border-neutral-300 hover:bg-neutral-100 text-neutral-800 text-[10px] font-bold"
+                                  title="Добавить +1 попытку и открыть допуск"
+                                >
+                                  +1
+                                </button>
+
+                                {(student.examAttemptsUsed ?? 0) > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      updateStudent(student.id, {
+                                        examAttemptsUsed: 0,
+                                        canTakeExam: true,
+                                      });
+                                    }}
+                                    className="px-1.5 py-0.5 bg-white rounded border border-neutral-300 hover:bg-neutral-100 text-neutral-800 text-[10px] font-bold"
+                                    title="Сбросить счетчик использованных попыток на 0 и открыть допуск"
+                                  >
+                                    Сброс
+                                  </button>
+                                )}
+                              </div>
+
+                              {/* Assigned Ticket Badge */}
+                              <div className="px-2 py-1 rounded-xl text-[11px] font-semibold border flex items-center gap-1.5 bg-purple-50 text-purple-900 border-purple-200">
+                                <Ticket className="w-3 h-3 text-purple-600 shrink-0" />
+                                <span>
+                                  {student.assignedExamTicket && typeof student.assignedExamTicket === 'number' ? (
+                                    <>Билет: <strong>№{student.assignedExamTicket}</strong> (назначен)</>
+                                  ) : (
+                                    <>Билет: <span className="font-normal text-purple-700">выбирает сам</span></>
+                                  )}
+                                </span>
+                              </div>
+                            </div>
 
                             {/* Section tabs quick pill badges */}
                             <div className="flex items-center gap-1 bg-neutral-100 p-1 rounded-xl border border-neutral-200 text-[10px] font-semibold">
@@ -790,6 +868,99 @@ export const StudentManagementModal: React.FC<StudentManagementModalProps> = ({
                       </span>
                     </div>
                   </label>
+                </div>
+
+                {/* Exam Attempts Setup */}
+                <div className="p-3 bg-indigo-50/60 rounded-xl border border-indigo-200 space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-neutral-900">
+                      Количество попыток сдачи экзамена:
+                    </span>
+                    <span className="text-[11px] text-indigo-700 font-medium">
+                      После исчерпания доступ закрывается
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    <div>
+                      <label className="text-[11px] font-semibold text-neutral-700 block mb-1">
+                        Разрешено попыток:
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="99"
+                        value={formData.examAttemptsAllowed}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            examAttemptsAllowed: Math.max(1, parseInt(e.target.value, 10) || 1),
+                          })
+                        }
+                        className="w-full px-3 py-1.5 bg-white border border-neutral-300 rounded-lg text-xs font-bold text-neutral-900 focus:ring-2 focus:ring-indigo-500"
+                        placeholder="1"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-semibold text-neutral-700 block mb-1">
+                        Использовано попыток:
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min="0"
+                          max="99"
+                          value={formData.examAttemptsUsed}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              examAttemptsUsed: Math.max(0, parseInt(e.target.value, 10) || 0),
+                            })
+                          }
+                          className="w-full px-3 py-1.5 bg-white border border-neutral-300 rounded-lg text-xs font-bold text-neutral-900 focus:ring-2 focus:ring-indigo-500"
+                          placeholder="0"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setFormData({ ...formData, examAttemptsUsed: 0, canTakeExam: true })}
+                          className="px-2.5 py-1.5 bg-white hover:bg-neutral-100 border border-neutral-300 rounded-lg text-[11px] font-bold text-neutral-700 shrink-0 transition-colors"
+                          title="Сбросить использованные попытки на 0 и открыть допуск"
+                        >
+                          Сбросить
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Assigned Ticket for Student */}
+                  <div className="pt-2 border-t border-indigo-100">
+                    <label className="text-[11px] font-semibold text-neutral-800 flex items-center gap-1.5 mb-1">
+                      <Ticket className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Назначенный экзаменационный билет:</span>
+                    </label>
+                    <select
+                      value={formData.assignedExamTicket ?? 'free_choice'}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setFormData({
+                          ...formData,
+                          assignedExamTicket: val === 'free_choice' ? 'free_choice' : Number(val),
+                        });
+                      }}
+                      className="w-full px-3 py-2 bg-white border border-neutral-300 rounded-lg text-xs font-bold text-neutral-900 focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="free_choice">Курсант выбирает сам при начале экзамена</option>
+                      {Array.from({ length: examSettings.totalTickets || 40 }, (_, idx) => idx + 1).map((tNum) => (
+                        <option key={tNum} value={tNum}>
+                          Билет №{tNum} (фиксированный допуск)
+                        </option>
+                      ))}
+                    </select>
+                    <span className="text-[10px] text-neutral-500 mt-1 block">
+                      Если назначен конкретный номер билета, курсант сразу сдаёт его без права выбора другого билета.
+                    </span>
+                  </div>
                 </div>
               </div>
 

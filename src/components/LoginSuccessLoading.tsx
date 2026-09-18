@@ -94,7 +94,7 @@ export const LoginSuccessLoading: React.FC<LoginSuccessLoadingProps> = ({
         {/* Bottom telemetry */}
         <div className="w-full pt-4 border-t border-[rgba(242,239,235,0.08)] flex justify-between font-jetbrains text-[9px] text-[rgba(242,239,235,0.35)] tracking-widest uppercase">
           <span>Узел: ДОСААФ</span>
-          <span>Версия v0.06</span>
+          <span>Версия v.0.08</span>
         </div>
       </div>
     </div>

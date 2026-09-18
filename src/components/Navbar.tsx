@@ -21,7 +21,6 @@ import {
   Users,
 } from 'lucide-react';
 import { AuthModal } from './AuthModal';
-import { GroupSettingsModal } from './GroupSettingsModal';
 import { StudentManagementModal } from './StudentManagementModal';
 import { NavTabsEditorModal } from './NavTabsEditorModal';
 import { EditableDesignBlock } from './EditableDesignBlock';
@@ -46,11 +45,12 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
     canAccessTab,
     navTabs,
     isExamInProgress,
+    isGroupModalOpen,
+    setIsGroupModalOpen,
   } = useApp();
   const { isDesignMode, toggleDesignMode } = useDesignEditor();
 
   const [isAuthOpen, setIsAuthOpen] = useState(false);
-  const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
   const [isStudentModalOpen, setIsStudentModalOpen] = useState(false);
   const [isNavTabsModalOpen, setIsNavTabsModalOpen] = useState(false);
 
@@ -202,9 +202,9 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
         {isAdmin && isDesignMode && (
           <div className="bg-neutral-900 text-amber-200 text-xs px-4 py-1.5 border-b border-amber-500/30 flex items-center justify-between gap-3 animate-in fade-in duration-200">
             <div className="flex items-center gap-2">
-              <MousePointer className="w-3.5 h-3.5 text-sky-400 animate-bounce" />
+              <Palette className="w-3.5 h-3.5 text-amber-400" />
               <span>
-                <strong>Редактор активен:</strong> Кликайте любой элемент страницы (включая шапку) для редактирования стиля/текста или перетаскивайте карточки мышкой!
+                <strong>Режим оформления:</strong> настройка внешнего вида блоков
               </span>
             </div>
             <button
@@ -418,6 +418,17 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
                     Гр. {g.number} {g.category === 'C' ? '(C)' : ''}
                   </button>
                 ))}
+                {isAdmin && (
+                  <button
+                    type="button"
+                    disabled={isExamInProgress}
+                    onClick={() => setIsGroupModalOpen(true)}
+                    className="px-1.5 py-1 text-neutral-500 hover:text-amber-700 hover:bg-amber-50 rounded-md transition-colors shrink-0"
+                    title="Настройка учебных групп"
+                  >
+                    <Layers className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
 
               {/* User / Admin pill button - Opens Auth Modal for login / switch / logout */}
@@ -479,12 +490,6 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
         isOpen={isAuthOpen}
         onClose={() => setIsAuthOpen(false)}
         defaultTab={isAdmin ? 'admin' : 'student'}
-      />
-
-      {/* Group Configuration Modal for Admin */}
-      <GroupSettingsModal
-        isOpen={isGroupModalOpen}
-        onClose={() => setIsGroupModalOpen(false)}
       />
 
       {/* Student Management & Security Modal for Admin */}

@@ -15,6 +15,7 @@ import { Footer } from './components/Footer';
 import { DesignInspector } from './components/DesignInspector';
 import { AuthModal } from './components/AuthModal';
 import { StudentManagementModal } from './components/StudentManagementModal';
+import { GroupSettingsModal } from './components/GroupSettingsModal';
 import { AuthGateScreen } from './components/AuthGateScreen';
 import { LoginSuccessLoading } from './components/LoginSuccessLoading';
 import { ShieldCheck, Car, Lock, AlertTriangle, Users } from 'lucide-react';
@@ -29,7 +30,7 @@ function AppContent() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [loginUserData, setLoginUserData] = useState<{ userName: string; role: 'student' | 'admin' } | null>(null);
 
-  const { currentUser, isAdmin, adminCredentials, groups, canAccessTab, isExamInProgress } = useApp();
+  const { currentUser, isAdmin, adminCredentials, groups, canAccessTab, isExamInProgress, isGroupModalOpen, setIsGroupModalOpen } = useApp();
   const { setActivePageKey } = useDesignEditor();
 
   // If exam is in progress, ensure user remains strictly in tests tab
@@ -170,6 +171,12 @@ function AppContent() {
       <StudentManagementModal
         isOpen={studentModalOpen}
         onClose={() => setStudentModalOpen(false)}
+      />
+
+      {/* Group Configuration Modal for Admin */}
+      <GroupSettingsModal
+        isOpen={isGroupModalOpen}
+        onClose={() => setIsGroupModalOpen(false)}
       />
     </div>
   );

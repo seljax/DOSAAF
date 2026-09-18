@@ -6,6 +6,7 @@ import { ImageInputControl } from './ImageInputControl';
 import { EditableDesignBlock } from './EditableDesignBlock';
 import { useDesignEditor } from '../context/DesignEditorContext';
 import confetti from 'canvas-confetti';
+import { ExamAdminModal } from './ExamAdminModal';
 import {
   CheckCircle2,
   XCircle,
@@ -29,6 +30,7 @@ import {
   ChevronRight,
   Lock,
   Unlock,
+  Settings,
   Settings2,
   Timer,
   Sliders,
@@ -41,14 +43,19 @@ import {
   Search,
   Truck,
   Car,
+  Ticket,
+  SkipForward,
+  Users,
 } from 'lucide-react';
 
 interface ActiveTestSession {
   category: QuestionCategory | null;
   isExamMode: boolean;
+  ticketNumber?: number | 'random';
   questionsList: Question[];
   currentIndex: number;
   userAnswers: Record<number, number>; // index -> chosen option index
+  skippedIndices?: number[]; // indices of questions skipped by cadet
   isFinished: boolean;
   startTime: number;
   elapsedSeconds: number;
@@ -70,6 +77,7 @@ export const TestsView: React.FC = () => {
     deleteQuestion,
     recordTestAttempt,
     isAdmin,
+    students,
     examSettings,
     updateExamSettings,
     getGroupName,
@@ -78,6 +86,8 @@ export const TestsView: React.FC = () => {
     canStudentTakeExam,
     toggleQuestionExamInclusion,
     batchSetQuestionsExamInclusion,
+    batchAssignQuestionsToTicket,
+    distributeQuestionsAcrossTickets,
     isExamInProgress,
     setIsExamInProgress,
     addActivityLog,
@@ -102,9 +112,17 @@ export const TestsView: React.FC = () => {
   const [isExamSettingsOpen, setIsExamSettingsOpen] = useState(false);
   const [localExamSettings, setLocalExamSettings] = useState(examSettings);
 
+  // Unified Admin Exam & Ticket Manager Modal
+  const [isExamAdminModalOpen, setIsExamAdminModalOpen] = useState(false);
+  const [examAdminTab, setExamAdminTab] = useState<'tickets' | 'questions' | 'settings'>('tickets');
+
   // Filter for question bank view
   const [selectedCatFilter, setSelectedCatFilter] = useState<string>('all');
   const [activeBankTab, setActiveBankTab] = useState<'quizzes' | 'manage_questions'>('quizzes');
+
+  // Ticket selection for Exam
+  const [selectedExamTicket, setSelectedExamTicket] = useState<number | 'random'>('random');
+  const [isTicketSelectModalOpen, setIsTicketSelectModalOpen] = useState(false);
 
   // Admin Modals
   const [isCatModalOpen, setIsCatModalOpen] = useState(false);
@@ -122,8 +140,10 @@ export const TestsView: React.FC = () => {
     imageUrl: '',
     signId: '',
     groupTarget: 'all' as string,
+    categoryType: 'all' as 'all' | 'B' | 'C' | 'BC',
     difficulty: 'medium' as 'easy' | 'medium' | 'hard',
     includeInExam: true,
+    ticketNumber: 1,
   });
 
   // Admin Exam Questions Builder & Manager Modal
@@ -132,6 +152,7 @@ export const TestsView: React.FC = () => {
   const [examQCatFilter, setExamQCatFilter] = useState('all');
   const [examQTargetFilter, setExamQTargetFilter] = useState<'all' | 'B' | 'C'>('all');
   const [examQStatusFilter, setExamQStatusFilter] = useState<'all' | 'included' | 'excluded'>('all');
+  const [examQTicketFilter, setExamQTicketFilter] = useState<number | 'all'>('all');
 
   // Keep local settings in sync with context
   useEffect(() => {
@@ -199,6 +220,12 @@ export const TestsView: React.FC = () => {
 
     if (sessionToFinish.isExamMode) {
       setIsExamInProgress(false);
+      if (examSettings.uniqueTicketPerStudent !== false) {
+        const updatedOccupied = (examSettings.occupiedTickets || []).filter(
+          (o) => o.studentId !== currentUser?.id
+        );
+        updateExamSettings({ occupiedTickets: updatedOccupied });
+      }
     }
 
     let correctCount = 0;
@@ -223,6 +250,10 @@ export const TestsView: React.FC = () => {
     });
 
     // Record to test attempts
+    const examTicketLabel = sessionToFinish.ticketNumber && sessionToFinish.ticketNumber !== 'random'
+      ? `Билет №${sessionToFinish.ticketNumber}`
+      : 'Случайный билет';
+
     recordTestAttempt({
       userId: currentUser?.id || 'guest',
       userName: currentUser?.name || 'Ученик',
@@ -230,16 +261,17 @@ export const TestsView: React.FC = () => {
       categoryId: sessionToFinish.category ? sessionToFinish.category.id : 'exam_mixed',
       categoryTitle: sessionToFinish.category
         ? sessionToFinish.category.title
-        : `Государственный экзамен (${sessionToFinish.questionsList.length} вопр.)`,
+        : `Гос. экзамен • ${examTicketLabel} (${sessionToFinish.questionsList.length} вопр.)`,
       totalQuestions: total,
       correctAnswers: correctCount,
       scorePercent,
       passed,
       abandoned: false,
-      answeredCount: total,
+      answeredCount: Object.keys(sessionToFinish.userAnswers).length,
       timeSpentSeconds: sessionToFinish.elapsedSeconds,
       wrongQuestionIds: wrongIds,
       isExam: sessionToFinish.isExamMode,
+      ticketNumber: sessionToFinish.isExamMode ? sessionToFinish.ticketNumber || 'random' : undefined,
     });
 
     if (passed) {
@@ -301,6 +333,12 @@ export const TestsView: React.FC = () => {
 
     if (sessionToAbort.isExamMode) {
       setIsExamInProgress(false);
+      if (examSettings.uniqueTicketPerStudent !== false) {
+        const updatedOccupied = (examSettings.occupiedTickets || []).filter(
+          (o) => o.studentId !== currentUser?.id
+        );
+        updateExamSettings({ occupiedTickets: updatedOccupied });
+      }
     }
 
     setActiveSession(null);
@@ -353,9 +391,28 @@ export const TestsView: React.FC = () => {
     });
   }, [questions, selectedGroupTab]);
 
+  // Available ticket numbers from questions database / settings (1 to totalTickets, max 40)
+  const availableTickets = useMemo(() => {
+    const total = Math.min(40, Math.max(1, examSettings.totalTickets || 40));
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }, [examSettings.totalTickets]);
+
+  // Current student account info for assigned ticket check
+  const currentStudentAccount = useMemo(() => {
+    return students.find(
+      (s) => s.id === currentUser?.id || s.login === currentUser?.id || s.name === currentUser?.name
+    );
+  }, [students, currentUser]);
+
+  const studentAssignedTicket = currentStudentAccount?.assignedExamTicket ?? currentUser?.assignedExamTicket;
+
   // Filtered list of questions in the Exam Questions Builder modal
   const filteredExamQuestions = useMemo(() => {
     return questions.filter((q) => {
+      // Ticket Filter
+      if (examQTicketFilter !== 'all' && (q.ticketNumber || 1) !== examQTicketFilter) {
+        return false;
+      }
       // Text Search
       if (examQSearch.trim()) {
         const needle = examQSearch.toLowerCase();
@@ -379,7 +436,7 @@ export const TestsView: React.FC = () => {
 
       return true;
     });
-  }, [questions, examQSearch, examQCatFilter, examQTargetFilter, examQStatusFilter]);
+  }, [questions, examQTicketFilter, examQSearch, examQCatFilter, examQTargetFilter, examQStatusFilter]);
 
   // Start Test in Category
   const handleStartCategoryTest = (category: QuestionCategory) => {
@@ -403,6 +460,7 @@ export const TestsView: React.FC = () => {
       questionsList: catQuestions,
       currentIndex: 0,
       userAnswers: {},
+      skippedIndices: [],
       isFinished: false,
       startTime: Date.now(),
       elapsedSeconds: 0,
@@ -410,39 +468,95 @@ export const TestsView: React.FC = () => {
     });
   };
 
-  // Trigger Exam Warning Modal
+  // Trigger Exam Start (Opens ticket selection or goes straight to exam if assigned by teacher)
   const handleStartExam = () => {
-    if (!examSettings.isOpen && !isAdmin) {
-      alert('Общий доступ к экзамену пока закрыт преподавателем.');
-      return;
-    }
-
-    if (!canStudentTakeExam()) {
-      alert('У вас нет персонального допуска к сдаче государственного экзамена ДОСААФ. Администратор автошколы должен предоставить вам допуск в панели управления.');
-      return;
+    if (!isAdmin) {
+      if (!canStudentTakeExam()) {
+        const student = students.find((s) => s.id === currentUser?.id || s.name === currentUser?.name);
+        const used = student?.examAttemptsUsed ?? currentUser?.examAttemptsUsed ?? 0;
+        const allowed = student?.examAttemptsAllowed ?? currentUser?.examAttemptsAllowed ?? 1;
+        if (used >= allowed) {
+          alert(`Все разрешённые попытки сдачи государственного экзамена (${used} из ${allowed}) использованы. Доступ к экзамену закрыт. Для назначения новой попытки обратитесь к администратору автошколы.`);
+        } else {
+          alert('Доступ к государственному экзамену закрыт. Администратор автошколы должен предоставить вам допуск в настройках курсантов.');
+        }
+        return;
+      }
     }
 
     const examCandidates = availableQuestions.filter((q) => q.includeInExam !== false);
     if (examCandidates.length === 0) {
-      alert('В пуле государственного экзамена пока нет активных вопросов. Администратор может включить вопросы в экзамен в банке вопросов.');
+      alert('В пуле государственного экзамена пока нет активных вопросов. Администратор может включить вопросы в экзамен в настройках экзамена.');
       return;
     }
 
+    // If teacher assigned a specific ticket to this student, use it directly
+    if (studentAssignedTicket && typeof studentAssignedTicket === 'number') {
+      setSelectedExamTicket(studentAssignedTicket);
+    } else {
+      setSelectedExamTicket(1);
+    }
     setExamAgreementChecked(false);
     setIsExamWarningOpen(true);
   };
 
-  // Confirm and Start Exam Mode with anti-cheat lock
-  const handleConfirmStartExam = () => {
+  // Confirm and Start Exam Mode with selected Ticket and anti-cheat lock
+  const handleConfirmStartExam = (ticketToTakeParam?: number | 'random') => {
+    const ticketToTake =
+      typeof ticketToTakeParam === 'number' || ticketToTakeParam === 'random'
+        ? ticketToTakeParam
+        : selectedExamTicket;
+
     const examCandidates = availableQuestions.filter((q) => q.includeInExam !== false);
     if (examCandidates.length === 0) {
       alert('Нет доступных вопросов в пуле экзамена.');
       return;
     }
 
-    const qCount = Math.min(examSettings.questionCount || 20, examCandidates.length);
-    const shuffled = [...examCandidates].sort(() => 0.5 - Math.random()).slice(0, qCount);
+    // Verify ticket exclusivity if enabled
+    if (ticketToTake !== 'random' && examSettings.uniqueTicketPerStudent !== false) {
+      const alreadyOccupied = (examSettings.occupiedTickets || []).find(
+        (o) => o.ticketNumber === ticketToTake && o.studentId !== currentUser?.id
+      );
+      if (alreadyOccupied) {
+        alert(
+          `Билет №${ticketToTake} уже выбран курсантом ${alreadyOccupied.studentName}. Выберите другой свободный билет.`
+        );
+        setIsExamWarningOpen(false);
+        setIsTicketSelectModalOpen(true);
+        return;
+      }
+
+      // Mark ticket as occupied by current student
+      const updatedOccupied = [
+        ...(examSettings.occupiedTickets || []).filter((o) => o.studentId !== currentUser?.id),
+        {
+          ticketNumber: ticketToTake,
+          studentId: currentUser?.id || 'guest',
+          studentName: currentUser?.name || 'Курсант',
+          timestamp: Date.now(),
+        },
+      ];
+      updateExamSettings({ occupiedTickets: updatedOccupied });
+    }
+
+    let finalQuestions: Question[] = [];
+    if (ticketToTake !== 'random') {
+      const ticketQuestions = examCandidates.filter((q) => (q.ticketNumber || 1) === ticketToTake);
+      if (ticketQuestions.length > 0) {
+        finalQuestions = [...ticketQuestions];
+      } else {
+        // Fallback if specific ticket has no questions
+        const qCount = Math.min(examSettings.questionCount || 20, examCandidates.length);
+        finalQuestions = [...examCandidates].sort(() => 0.5 - Math.random()).slice(0, qCount);
+      }
+    } else {
+      const qCount = Math.min(examSettings.questionCount || 20, examCandidates.length);
+      finalQuestions = [...examCandidates].sort(() => 0.5 - Math.random()).slice(0, qCount);
+    }
+
     const limitSec = (examSettings.timeLimitMinutes || 20) * 60;
+    const ticketLabel = ticketToTake === 'random' ? 'Случайный билет' : `Билет №${ticketToTake}`;
 
     setIsExamWarningOpen(false);
     setIsExamInProgress(true);
@@ -467,16 +581,18 @@ export const TestsView: React.FC = () => {
       userGroup: currentUser?.group || groups[0]?.id || '',
       userRole: currentUser?.isAdmin ? 'admin' : 'student',
       actionType: 'exam_started',
-      message: `🏁 Начал(а) сдачу государственного экзамена ДОСААФ`,
-      details: `Билет сформирован из пула (${qCount} вопр.). Лимит: ${Math.round(limitSec / 60)} мин. Включен строгий режим анти-списывания.`,
+      message: `🏁 Начал(а) сдачу государственного экзамена ДОСААФ (${ticketLabel})`,
+      details: `${ticketLabel} (${finalQuestions.length} вопр.). Лимит: ${Math.round(limitSec / 60)} мин. Включен строгий режим анти-списывания.`,
     });
 
     setActiveSession({
       category: null,
       isExamMode: true,
-      questionsList: shuffled,
+      ticketNumber: ticketToTake,
+      questionsList: finalQuestions,
       currentIndex: 0,
       userAnswers: {},
+      skippedIndices: [],
       isFinished: false,
       startTime: Date.now(),
       elapsedSeconds: 0,
@@ -500,15 +616,94 @@ export const TestsView: React.FC = () => {
     });
   };
 
-  // Move to next question or finish
+  // Skip question to return to it later
+  const handleSkipQuestion = () => {
+    if (!activeSession || activeSession.isFinished) return;
+    const currentIdx = activeSession.currentIndex;
+    const total = activeSession.questionsList.length;
+
+    // Add current index to skippedIndices list
+    const nextSkipped = Array.from(new Set([...(activeSession.skippedIndices || []), currentIdx]));
+
+    // Find next unanswered question:
+    // 1) look ahead: currentIdx + 1 .. total - 1
+    let nextIdx = -1;
+    for (let i = currentIdx + 1; i < total; i++) {
+      if (activeSession.userAnswers[i] === undefined) {
+        nextIdx = i;
+        break;
+      }
+    }
+    // 2) if not found ahead, loop from start: 0 .. currentIdx - 1
+    if (nextIdx === -1) {
+      for (let i = 0; i < currentIdx; i++) {
+        if (activeSession.userAnswers[i] === undefined) {
+          nextIdx = i;
+          break;
+        }
+      }
+    }
+
+    if (nextIdx === -1) {
+      nextIdx = currentIdx < total - 1 ? currentIdx + 1 : currentIdx;
+    }
+
+    setActiveSession({
+      ...activeSession,
+      skippedIndices: nextSkipped,
+      currentIndex: nextIdx,
+    });
+  };
+
+  // Jump to next remaining skipped question
+  const handleJumpToNextSkipped = () => {
+    if (!activeSession) return;
+    const skippedUnanswered = (activeSession.skippedIndices || []).filter(
+      (idx) => activeSession.userAnswers[idx] === undefined
+    );
+    if (skippedUnanswered.length > 0) {
+      const nextSkipped = skippedUnanswered.find((idx) => idx > activeSession.currentIndex) ?? skippedUnanswered[0];
+      setActiveSession({
+        ...activeSession,
+        currentIndex: nextSkipped,
+      });
+    }
+  };
+
+  // Move to next question or finish with skipped check
   const handleNextOrFinish = () => {
     if (!activeSession) return;
-    if (activeSession.currentIndex < activeSession.questionsList.length - 1) {
+    const total = activeSession.questionsList.length;
+
+    if (activeSession.currentIndex < total - 1) {
       setActiveSession({
         ...activeSession,
         currentIndex: activeSession.currentIndex + 1,
       });
     } else {
+      // Check for remaining unanswered / skipped questions
+      const unansweredIndices: number[] = [];
+      for (let i = 0; i < total; i++) {
+        if (activeSession.userAnswers[i] === undefined) {
+          unansweredIndices.push(i);
+        }
+      }
+
+      if (unansweredIndices.length > 0) {
+        const confirmFinish = confirm(
+          `Внимание! У вас осталось ${unansweredIndices.length} неотвеченных/пропущенных вопросов (№ ${unansweredIndices
+            .map((i) => i + 1)
+            .join(', ')}).\n\nНажмите «Отмена», чтобы вернуться к первому пропущенному вопросу, или «ОК», чтобы завершить тест прямо сейчас.`
+        );
+        if (!confirmFinish) {
+          setActiveSession({
+            ...activeSession,
+            currentIndex: unansweredIndices[0],
+          });
+          return;
+        }
+      }
+
       finishActiveTest(activeSession);
     }
   };
@@ -534,6 +729,11 @@ export const TestsView: React.FC = () => {
     const answeredCount = Object.keys(activeSession.userAnswers).length;
     const selectedOption = activeSession.userAnswers[activeSession.currentIndex];
     const hasAnsweredCurrent = selectedOption !== undefined;
+
+    // Exam settings flags
+    const isExam = activeSession.isExamMode;
+    const showImmediate = isExam ? examSettings.showImmediateFeedback === true : true;
+    const allowNav = isExam ? examSettings.allowQuestionNavigation === true : true;
 
     // Remaining time calculation
     const isTimerActive = activeSession.timeLimitSeconds > 0;
@@ -735,7 +935,13 @@ export const TestsView: React.FC = () => {
             </button>
             <div>
               <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 block">
-                {activeSession.isExamMode ? 'Государственный экзамен ГИБДД' : activeSession.category?.title}
+                {activeSession.isExamMode
+                  ? `Гос. экзамен ДОСААФ • ${
+                      activeSession.ticketNumber && activeSession.ticketNumber !== 'random'
+                        ? `Билет №${activeSession.ticketNumber}`
+                        : 'Случайный билет'
+                    }`
+                  : activeSession.category?.title}
               </span>
               <span className="text-xs font-bold text-neutral-900">
                 Вопрос {activeSession.currentIndex + 1} из {totalQ}
@@ -767,6 +973,82 @@ export const TestsView: React.FC = () => {
             className="bg-blue-600 h-full transition-all duration-300"
             style={{ width: `${((activeSession.currentIndex + 1) / totalQ) * 100}%` }}
           />
+        </div>
+
+        {/* Interactive Question Numbers Palette */}
+        <div className="bg-white rounded-2xl border border-neutral-200 p-3 shadow-xs space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] font-bold text-neutral-600 flex items-center gap-1.5">
+              <Layers className="w-3.5 h-3.5 text-neutral-400" />
+              <span>Вопросы билета ({totalQ}):</span>
+            </span>
+            <div className="flex items-center gap-2">
+              {activeSession.skippedIndices && activeSession.skippedIndices.some((idx) => activeSession.userAnswers[idx] === undefined) && (
+                <span className="text-[11px] font-semibold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200 flex items-center gap-1">
+                  <SkipForward className="w-3 h-3" />
+                  Пропущено: {activeSession.skippedIndices.filter((idx) => activeSession.userAnswers[idx] === undefined).length}
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {activeSession.questionsList.map((q, idx) => {
+              const isCurrent = idx === activeSession.currentIndex;
+              const isAnswered = activeSession.userAnswers[idx] !== undefined;
+              const isCorrect = isAnswered && activeSession.userAnswers[idx] === q.correctAnswerIndex;
+              const isSkipped = (activeSession.skippedIndices || []).includes(idx) && !isAnswered;
+
+              let pillClass = 'bg-neutral-100 text-neutral-600 border-neutral-200 hover:bg-neutral-200';
+              if (isCurrent) {
+                pillClass = 'ring-2 ring-blue-600 bg-blue-600 text-white font-black shadow-xs';
+              } else if (isAnswered) {
+                if (showImmediate) {
+                  pillClass = isCorrect
+                    ? 'bg-emerald-100 text-emerald-800 border-emerald-300 font-bold'
+                    : 'bg-rose-100 text-rose-800 border-rose-300 font-bold';
+                } else {
+                  pillClass = 'bg-blue-100 text-blue-900 border-blue-300 font-bold';
+                }
+              } else if (isSkipped) {
+                pillClass = 'bg-amber-100 text-amber-900 border-amber-300 font-bold';
+              }
+
+              return (
+                <button
+                  key={idx}
+                  onClick={
+                    allowNav
+                      ? () => {
+                          setActiveSession({
+                            ...activeSession,
+                            currentIndex: idx,
+                          });
+                        }
+                      : undefined
+                  }
+                  className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl border text-xs flex items-center justify-center transition-all relative ${pillClass} ${
+                    allowNav ? 'cursor-pointer' : 'cursor-default'
+                  }`}
+                  title={`Вопрос №${idx + 1}${
+                    isSkipped
+                      ? ' (пропущен)'
+                      : isAnswered
+                      ? showImmediate
+                        ? isCorrect
+                          ? ' (верно)'
+                          : ' (ошибка)'
+                        : ' (ответ дан)'
+                      : ''
+                  }${!allowNav ? ' • переключение отключено' : ''}`}
+                >
+                  <span>{idx + 1}</span>
+                  {isSkipped && (
+                    <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-500 ring-1 ring-white" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* Question Card with Anti-Copy & Anti-Selection */}
@@ -812,12 +1094,20 @@ export const TestsView: React.FC = () => {
               let btnStyle = 'border-neutral-200 hover:border-neutral-300 bg-white text-neutral-800';
 
               if (hasAnsweredCurrent) {
-                if (isCorrect) {
-                  btnStyle = 'border-emerald-500 bg-emerald-50/70 text-emerald-950 font-medium';
-                } else if (isSelected && !isCorrect) {
-                  btnStyle = 'border-rose-500 bg-rose-50/70 text-rose-950';
+                if (showImmediate) {
+                  if (isCorrect) {
+                    btnStyle = 'border-emerald-500 bg-emerald-50/70 text-emerald-950 font-medium';
+                  } else if (isSelected && !isCorrect) {
+                    btnStyle = 'border-rose-500 bg-rose-50/70 text-rose-950';
+                  } else {
+                    btnStyle = 'border-neutral-200 bg-neutral-50/50 text-neutral-400 opacity-60';
+                  }
                 } else {
-                  btnStyle = 'border-neutral-200 bg-neutral-50/50 text-neutral-400 opacity-60';
+                  if (isSelected) {
+                    btnStyle = 'border-blue-600 bg-blue-50/80 text-blue-950 font-bold ring-2 ring-blue-500/20';
+                  } else {
+                    btnStyle = 'border-neutral-200 bg-neutral-50/50 text-neutral-400 opacity-60';
+                  }
                 }
               }
 
@@ -841,19 +1131,24 @@ export const TestsView: React.FC = () => {
                     <span className="leading-relaxed">{option}</span>
                   </div>
 
-                  {hasAnsweredCurrent && isCorrect && (
+                  {hasAnsweredCurrent && showImmediate && isCorrect && (
                     <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
                   )}
-                  {hasAnsweredCurrent && isSelected && !isCorrect && (
+                  {hasAnsweredCurrent && showImmediate && isSelected && !isCorrect && (
                     <XCircle className="w-5 h-5 text-rose-600 shrink-0" />
+                  )}
+                  {hasAnsweredCurrent && !showImmediate && isSelected && (
+                    <span className="px-2.5 py-1 rounded-full bg-blue-100 text-blue-800 text-[11px] font-bold shrink-0">
+                      Ответ принят
+                    </span>
                   )}
                 </button>
               );
             })}
           </div>
 
-          {/* Explanation if answered */}
-          {hasAnsweredCurrent && (
+          {/* Explanation if answered and immediate feedback is enabled */}
+          {hasAnsweredCurrent && showImmediate && currentQ.explanation && (
             <div className="p-4 bg-blue-50/60 border border-blue-200 rounded-2xl text-xs text-blue-950 space-y-1.5 animate-in fade-in duration-200">
               <span className="font-bold flex items-center gap-1.5 text-blue-900">
                 <HelpCircle className="w-4 h-4 text-blue-700" />
@@ -863,18 +1158,131 @@ export const TestsView: React.FC = () => {
             </div>
           )}
 
-          {/* Action button */}
-          {hasAnsweredCurrent && (
-            <div className="pt-2 flex justify-end">
+          {/* Action controls before answering: Previous + Skip + Next */}
+          {!hasAnsweredCurrent && allowNav && (
+            <div className="pt-2 flex items-center justify-between gap-2 border-t border-neutral-100">
               <button
-                onClick={handleNextOrFinish}
-                className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs transition-colors"
+                type="button"
+                disabled={activeSession.currentIndex === 0}
+                onClick={() => {
+                  if (activeSession.currentIndex > 0) {
+                    setActiveSession({
+                      ...activeSession,
+                      currentIndex: activeSession.currentIndex - 1,
+                    });
+                  }
+                }}
+                className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors ${
+                  activeSession.currentIndex === 0
+                    ? 'text-neutral-300 cursor-not-allowed'
+                    : 'text-neutral-600 hover:bg-neutral-100 cursor-pointer'
+                }`}
               >
-                <span>
-                  {activeSession.currentIndex < totalQ - 1 ? 'Следующий вопрос' : 'Завершить тест'}
-                </span>
-                <ArrowRight className="w-4 h-4" />
+                <ArrowLeft className="w-4 h-4" />
+                <span>Назад</span>
               </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleSkipQuestion}
+                  className="px-4 py-2 bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                  title="Пропустить вопрос и вернуться к нему позже"
+                >
+                  <SkipForward className="w-4 h-4 text-amber-700" />
+                  <span>Пропустить вопрос</span>
+                </button>
+
+                {activeSession.currentIndex < totalQ - 1 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveSession({
+                        ...activeSession,
+                        currentIndex: activeSession.currentIndex + 1,
+                      });
+                    }}
+                    className="px-3 py-2 text-neutral-600 hover:bg-neutral-100 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    <span>Вперёд</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+          {!hasAnsweredCurrent && !allowNav && (
+            <div className="pt-2 flex items-center justify-between border-t border-neutral-100 text-xs text-neutral-500">
+              <span className="text-[11px]">Выберите вариант ответа для перехода дальше</span>
+              <span className="text-[10px] bg-neutral-100 text-neutral-600 font-semibold px-2 py-0.5 rounded-md">
+                Последовательный экзамен
+              </span>
+            </div>
+          )}
+
+          {/* Action controls after answering */}
+          {hasAnsweredCurrent && (
+            <div className="pt-2 flex items-center justify-between gap-2 border-t border-neutral-100">
+              {allowNav ? (
+                <button
+                  type="button"
+                  disabled={activeSession.currentIndex === 0}
+                  onClick={() => {
+                    if (activeSession.currentIndex > 0) {
+                      setActiveSession({
+                        ...activeSession,
+                        currentIndex: activeSession.currentIndex - 1,
+                      });
+                    }
+                  }}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors ${
+                    activeSession.currentIndex === 0
+                      ? 'text-neutral-300 cursor-not-allowed'
+                      : 'text-neutral-600 hover:bg-neutral-100 cursor-pointer'
+                  }`}
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  <span>Назад</span>
+                </button>
+              ) : (
+                <div />
+              )}
+
+              <div className="flex items-center gap-2">
+                {allowNav &&
+                  activeSession.skippedIndices &&
+                  activeSession.skippedIndices.some(
+                    (idx) => activeSession.userAnswers[idx] === undefined
+                  ) && (
+                    <button
+                      type="button"
+                      onClick={handleJumpToNextSkipped}
+                      className="px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                      title="Перейти к следующему пропущенному вопросу"
+                    >
+                      <SkipForward className="w-3.5 h-3.5 text-amber-700" />
+                      <span>
+                        К пропущенным (
+                        {
+                          activeSession.skippedIndices.filter(
+                            (idx) => activeSession.userAnswers[idx] === undefined
+                          ).length
+                        }
+                        )
+                      </span>
+                    </button>
+                  )}
+
+                <button
+                  onClick={handleNextOrFinish}
+                  className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs transition-colors cursor-pointer"
+                >
+                  <span>
+                    {activeSession.currentIndex < totalQ - 1 ? 'Следующий вопрос' : 'Завершить экзамен'}
+                  </span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -992,119 +1400,120 @@ export const TestsView: React.FC = () => {
             defaultTitle="Государственный теоретический экзамен"
             defaultSubtitle="Вопросы выбираются со всех тем ПДД в случайном порядке. Проверка готовности к сдаче в ГИБДД."
             defaultClasses={{
-              bg: examSettings.isOpen
-                ? 'bg-gradient-to-br from-blue-900 to-indigo-950 text-white'
-                : 'bg-neutral-900 text-white',
-              border: examSettings.isOpen ? 'border-blue-800' : 'border-neutral-800',
+              bg: 'bg-gradient-to-br from-blue-900 to-indigo-950 text-white',
+              border: 'border-blue-800',
               radius: 'rounded-3xl',
               padding: 'p-6 sm:p-7',
               shadow: 'shadow-xs',
             }}
           >
-            {({ title, subtitle }) => (
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
-                <div className="space-y-2 max-w-xl">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-400 text-neutral-950">
-                      Официальный формат ГИБДД
-                    </span>
+            {({ title, subtitle }) => {
+              const currentStudent = students.find((s) => s.id === currentUser?.id || s.name === currentUser?.name);
+              const attemptsUsed = currentStudent?.examAttemptsUsed ?? currentUser?.examAttemptsUsed ?? 0;
+              const attemptsAllowed = currentStudent?.examAttemptsAllowed ?? currentUser?.examAttemptsAllowed ?? 1;
+              const canTake = canStudentTakeExam();
 
-                    {examSettings.isOpen ? (
-                      <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 flex items-center gap-1">
-                        <Unlock className="w-3 h-3" />
-                        Экзамен открыт в автошколе
+              return (
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
+                  <div className="space-y-2 max-w-xl">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-400 text-neutral-950">
+                        Официальный формат ГИБДД
                       </span>
-                    ) : (
-                      <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-400/30 flex items-center gap-1">
-                        <Lock className="w-3 h-3" />
-                        Экзамен закрыт преподавателем
-                      </span>
-                    )}
 
-                    {!isAdmin && (
-                      canStudentTakeExam() ? (
-                        <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-400/30 flex items-center gap-1">
-                          <CheckCircle2 className="w-3 h-3 text-blue-400" />
-                          Персональный допуск: Выдан
-                        </span>
+                      {!isAdmin ? (
+                        canTake ? (
+                          <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                            Допуск к экзамену открыт (Попытка {attemptsUsed + 1} из {attemptsAllowed})
+                          </span>
+                        ) : (
+                          <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-400/30 flex items-center gap-1">
+                            <Lock className="w-3 h-3 text-rose-400" />
+                            {attemptsUsed >= attemptsAllowed
+                              ? `Попытки исчерпаны (${attemptsUsed} из ${attemptsAllowed}) — доступ закрыт`
+                              : 'Допуск к экзамену закрыт администратором'}
+                          </span>
+                        )
                       ) : (
                         <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-400/30 flex items-center gap-1">
-                          <Lock className="w-3 h-3 text-amber-400" />
-                          Персональный допуск: Не выдан
+                          <ShieldCheck className="w-3 h-3 text-amber-400" />
+                          Режим управления экзаменом (допуски курсантов)
                         </span>
-                      )
+                      )}
+                    </div>
+
+                    <h3 className="text-xl sm:text-2xl font-black">
+                      {title}
+                    </h3>
+
+                    <p className="text-xs text-neutral-300 leading-relaxed">
+                      {subtitle}
+                      {examSettings.timeLimitMinutes > 0 &&
+                        ` Ограничение времени: ${examSettings.timeLimitMinutes} минут.`}{' '}
+                      Количество вопросов: {examSettings.questionCount || 20}.
+                    </p>
+
+                    {isAdmin && (
+                      <div className="pt-2 flex items-center gap-2 flex-wrap">
+                        <button
+                          onClick={() => {
+                            setExamAdminTab('tickets');
+                            setIsExamAdminModalOpen(true);
+                          }}
+                          className="px-4 py-2 rounded-2xl text-xs font-black bg-amber-400 hover:bg-amber-300 text-neutral-950 transition-all flex items-center gap-2 shadow-md cursor-pointer active:scale-95"
+                          title="Редактирование билетов, банк вопросов и все параметры государственного экзамена"
+                        >
+                          <Settings className="w-4 h-4 text-neutral-950" />
+                          <span>Настройки и билеты государственного экзамена</span>
+                        </button>
+                      </div>
                     )}
                   </div>
 
-                  <h3 className="text-xl sm:text-2xl font-black">
-                    {title}
-                  </h3>
+                  <div className="shrink-0 flex flex-col items-start md:items-end gap-3">
+                    {/* Ticket Status Indicator */}
+                    {studentAssignedTicket && typeof studentAssignedTicket === 'number' ? (
+                      <div className="p-3 rounded-2xl bg-amber-400/20 border border-amber-400/40 text-amber-200 text-xs flex items-center gap-2.5 max-w-sm">
+                        <Lock className="w-4 h-4 text-amber-400 shrink-0" />
+                        <div>
+                          <span className="font-bold text-white block">Вам назначен Билет №{studentAssignedTicket}</span>
+                          <span className="text-[11px] text-neutral-300">
+                            Преподаватель закрепил за вами персональный экзаменационный билет
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-2.5 px-3 rounded-xl bg-white/10 border border-white/15 text-neutral-300 text-xs flex items-center gap-2">
+                        <Ticket className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        <span className="text-[11px]">
+                          Выбор билета (1—{examSettings.totalTickets || 40}) откроется после нажатия «Начать экзамен»
+                        </span>
+                      </div>
+                    )}
 
-                  <p className="text-xs text-neutral-300 leading-relaxed">
-                    {subtitle}
-                    {examSettings.timeLimitMinutes > 0 &&
-                      ` Ограничение времени: ${examSettings.timeLimitMinutes} минут.`}{' '}
-                    Количество вопросов: {examSettings.questionCount || 20}.
-                  </p>
-
-                  {isAdmin && (
-                    <div className="pt-2 flex items-center gap-2 flex-wrap">
+                    {canTake || isAdmin ? (
                       <button
-                        onClick={() => updateExamSettings({ isOpen: !examSettings.isOpen })}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-xs ${
-                          examSettings.isOpen
-                            ? 'bg-rose-600 hover:bg-rose-700 text-white'
-                            : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                        }`}
+                        onClick={handleStartExam}
+                        className="px-6 py-3 bg-amber-400 hover:bg-amber-300 text-neutral-950 font-black rounded-2xl text-sm flex items-center gap-2 shadow-lg transition-transform active:scale-95 cursor-pointer"
                       >
-                        {examSettings.isOpen ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
-                        <span>{examSettings.isOpen ? 'Закрыть доступ курсантов' : 'Открыть доступ курсантов'}</span>
+                        <Play className="w-4 h-4 fill-neutral-950" />
+                        <span>Начать государственный экзамен</span>
                       </button>
-
-                      <button
-                        onClick={() => setIsExamQuestionsModalOpen(true)}
-                        className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-amber-400 hover:bg-amber-300 text-neutral-950 transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer"
-                        title="Выбрать, какие вопросы включить в билет, фильтровать по кат. B/C или отредактировать формулировки"
-                      >
-                        <Sliders className="w-3.5 h-3.5 text-neutral-950" />
-                        <span>Решить состав вопросов экзамена</span>
-                      </button>
-
-                      <button
-                        onClick={() => setIsExamSettingsOpen(true)}
-                        className="px-3 py-1.5 rounded-xl text-xs font-bold bg-white/20 hover:bg-white/30 text-white transition-colors flex items-center gap-1.5 cursor-pointer"
-                        title="Настроить таймер, лимит времени и проходной балл"
-                      >
-                        <Timer className="w-3.5 h-3.5" />
-                        <span>Таймер и параметры</span>
-                      </button>
-                    </div>
-                  )}
+                    ) : (
+                      <div className="p-4 bg-neutral-900/90 rounded-2xl border border-neutral-700 text-xs text-neutral-300 flex items-center gap-2 max-w-xs shadow-md">
+                        <Lock className="w-5 h-5 text-amber-400 shrink-0" />
+                        <span>
+                          {attemptsUsed >= attemptsAllowed
+                            ? `Все попытки сдачи экзамена использованы (${attemptsUsed} из ${attemptsAllowed}). Доступ закрыт до решения администратора.`
+                            : 'Администратор автошколы еще не предоставил вам персональный допуск к сдаче государственного экзамена.'}
+                        </span>
+                      </div>
+                    )}
+                  </div>
                 </div>
-
-                <div className="shrink-0 flex flex-col items-start md:items-end gap-2">
-                  {(examSettings.isOpen && canStudentTakeExam()) || isAdmin ? (
-                    <button
-                      onClick={handleStartExam}
-                      className="px-6 py-3 bg-amber-400 hover:bg-amber-300 text-neutral-950 font-black rounded-2xl text-sm flex items-center gap-2 shadow-lg transition-transform active:scale-95"
-                    >
-                      <Play className="w-4 h-4 fill-neutral-950" />
-                      <span>Сдать экзамен ({examSettings.questionCount || 20} вопр.)</span>
-                    </button>
-                  ) : !canStudentTakeExam() && !isAdmin ? (
-                    <div className="p-3.5 bg-amber-500/10 rounded-2xl border border-amber-400/30 text-xs text-amber-200 flex items-center gap-2 max-w-xs">
-                      <Lock className="w-5 h-5 text-amber-400 shrink-0" />
-                      <span>Администратор еще не предоставил вам персональный допуск к сдаче экзамена.</span>
-                    </div>
-                  ) : (
-                    <div className="p-4 bg-white/10 rounded-2xl border border-white/10 text-xs text-neutral-300 flex items-center gap-2 max-w-xs">
-                      <Lock className="w-5 h-5 text-amber-400 shrink-0" />
-                      <span>Экзамен будет открыт преподавателем во время зачета или итоговой проверки</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
+              );
+            }}
           </EditableDesignBlock>
 
           {/* THEMATIC CATEGORY CARDS */}
@@ -1477,7 +1886,7 @@ export const TestsView: React.FC = () => {
       {/* ADMIN EXAM & TIMER SETTINGS MODAL */}
       {isExamSettingsOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-xs">
-          <div className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl border border-neutral-200 p-6 sm:p-7">
+          <div className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-neutral-200 p-6 sm:p-7 max-h-[92vh] overflow-y-auto">
             <button
               onClick={() => setIsExamSettingsOpen(false)}
               className="absolute right-4 top-4 p-2 text-neutral-400 hover:text-neutral-700 rounded-xl"
@@ -1491,10 +1900,10 @@ export const TestsView: React.FC = () => {
               </div>
               <div>
                 <h3 className="text-base font-bold text-neutral-900">
-                  Настройки экзамена и таймеров
+                  Настройки государственного экзамена
                 </h3>
                 <span className="text-xs text-neutral-500 font-medium">
-                  Параметры сдачи для курсантов
+                  Регламент, билеты и параметры сдачи курсантов
                 </span>
               </div>
             </div>
@@ -1503,7 +1912,7 @@ export const TestsView: React.FC = () => {
               {/* Exam Access switch */}
               <div className="p-3.5 rounded-2xl border border-neutral-200 bg-neutral-50 space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="font-bold text-neutral-800">Доступ к экзамену</span>
+                  <span className="font-bold text-neutral-800">Общий доступ к экзамену</span>
                   <input
                     type="checkbox"
                     checked={localExamSettings.isOpen}
@@ -1515,14 +1924,148 @@ export const TestsView: React.FC = () => {
                 </div>
                 <p className="text-[11px] text-neutral-500">
                   {localExamSettings.isOpen
-                    ? 'Экзамен ОТКРЫТ для всех курсантов'
-                    : 'Экзамен ЗАКРЫТ (курсанты увидят уведомление о запрете сдачи)'}
+                    ? 'Экзамен ОТКРЫТ для курсантов с персональным допуском'
+                    : 'Экзамен ЗАКРЫТ (курсанты увидят уведомление о закрытии экзамена)'}
                 </p>
+              </div>
+
+              {/* Number of Tickets (max 40) */}
+              <div className="p-3.5 rounded-2xl border border-neutral-200 bg-neutral-50 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="font-bold text-neutral-800 block">
+                      Количество билетов (максимум 40)
+                    </span>
+                    <span className="text-[11px] text-neutral-500 block">
+                      Администратор может добавлять или убирать их количество
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="number"
+                      min={1}
+                      max={40}
+                      value={localExamSettings.totalTickets ?? 40}
+                      onChange={(e) => {
+                        const val = Math.min(40, Math.max(1, Number(e.target.value) || 1));
+                        setLocalExamSettings({ ...localExamSettings, totalTickets: val });
+                      }}
+                      className="w-20 px-2.5 py-1.5 border border-neutral-300 rounded-xl font-mono text-sm font-black text-center bg-white"
+                    />
+                    <span className="text-neutral-500 text-[11px] font-bold">шт.</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 pt-1">
+                  <span className="text-[11px] text-neutral-400 mr-1">Быстрый выбор:</span>
+                  {[10, 20, 30, 40].map((count) => (
+                    <button
+                      key={count}
+                      type="button"
+                      onClick={() => setLocalExamSettings({ ...localExamSettings, totalTickets: count })}
+                      className={`px-2.5 py-1 rounded-lg font-bold text-xs transition-colors cursor-pointer ${
+                        (localExamSettings.totalTickets ?? 40) === count
+                          ? 'bg-neutral-900 text-white'
+                          : 'bg-white border text-neutral-600 hover:bg-neutral-100'
+                      }`}
+                    >
+                      {count}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Immediate Feedback Toggle */}
+              <div className="p-3.5 rounded-2xl border border-neutral-200 bg-neutral-50 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-neutral-800">
+                    Показывать правильные и неправильные ответы во время экзамена
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={localExamSettings.showImmediateFeedback === true}
+                    onChange={(e) =>
+                      setLocalExamSettings({
+                        ...localExamSettings,
+                        showImmediateFeedback: e.target.checked,
+                      })
+                    }
+                    className="w-5 h-5 accent-blue-600 rounded cursor-pointer"
+                  />
+                </div>
+                <p className="text-[11px] text-neutral-500">
+                  {localExamSettings.showImmediateFeedback === true
+                    ? 'ВКЛЮЧЕНО: курсант сразу видит правильность ответа и подсветку вариантов.'
+                    : 'ВЫКЛЮЧЕНО (регламент): на экзамене не показываются правильные или неправильные ответы — они появляются только в конце экзамена.'}
+                </p>
+              </div>
+
+              {/* Question Navigation Toggle */}
+              <div className="p-3.5 rounded-2xl border border-neutral-200 bg-neutral-50 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-neutral-800">
+                    Разрешить переключение между вопросами на экзамене
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={localExamSettings.allowQuestionNavigation === true}
+                    onChange={(e) =>
+                      setLocalExamSettings({
+                        ...localExamSettings,
+                        allowQuestionNavigation: e.target.checked,
+                      })
+                    }
+                    className="w-5 h-5 accent-blue-600 rounded cursor-pointer"
+                  />
+                </div>
+                <p className="text-[11px] text-neutral-500">
+                  {localExamSettings.allowQuestionNavigation === true
+                    ? 'ВКЛЮЧЕНО: курсант может переключаться между вопросами и пропускать их.'
+                    : 'ВЫКЛЮЧЕНО (регламент): переключаться между вопросами нельзя — курсант отвечает строго по очереди.'}
+                </p>
+              </div>
+
+              {/* Ticket Exclusivity Toggle */}
+              <div className="p-3.5 rounded-2xl border border-neutral-200 bg-neutral-50 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-neutral-800">
+                    Блокировать уже выбранный билет для других курсантов (эксклюзивность)
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={localExamSettings.uniqueTicketPerStudent !== false}
+                    onChange={(e) =>
+                      setLocalExamSettings({
+                        ...localExamSettings,
+                        uniqueTicketPerStudent: e.target.checked,
+                      })
+                    }
+                    className="w-5 h-5 accent-blue-600 rounded cursor-pointer"
+                  />
+                </div>
+                <p className="text-[11px] text-neutral-500">
+                  {localExamSettings.uniqueTicketPerStudent !== false
+                    ? 'ВКЛЮЧЕНО: если курсант выбрал билет, второму курсанту уже выбранный билет не доступен.'
+                    : 'ВЫКЛЮЧЕНО: разные курсанты могут параллельно выбирать один и тот же билет.'}
+                </p>
+                {(localExamSettings.occupiedTickets?.length || 0) > 0 && (
+                  <div className="pt-2 flex items-center justify-between border-t border-neutral-200 text-[11px]">
+                    <span className="text-amber-800 font-medium">
+                      Сейчас занято билетов: <strong>{localExamSettings.occupiedTickets?.length}</strong>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setLocalExamSettings({ ...localExamSettings, occupiedTickets: [] })}
+                      className="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold rounded-lg transition-colors cursor-pointer"
+                    >
+                      Сбросить все занятые билеты
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div>
                 <label className="font-semibold text-neutral-700 block mb-1">
-                  Количество вопросов в экзамене
+                  Количество вопросов в билете
                 </label>
                 <input
                   type="number"
@@ -1538,7 +2081,7 @@ export const TestsView: React.FC = () => {
                   className="w-full px-3 py-2 border rounded-xl font-mono text-sm"
                 />
                 <span className="text-[11px] text-neutral-400 mt-1 block">
-                  Вопросы выбираются случайно со всех доступных тестов (стандарт ГИБДД: 20)
+                  Стандарт ГИБДД: 20 вопросов
                 </span>
               </div>
 
@@ -1612,13 +2155,13 @@ export const TestsView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setIsExamSettingsOpen(false)}
-                  className="px-4 py-2 border border-neutral-200 text-neutral-600 rounded-xl"
+                  className="px-4 py-2 border border-neutral-200 text-neutral-600 rounded-xl cursor-pointer"
                 >
                   Отмена
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-neutral-900 hover:bg-neutral-800 text-white rounded-xl font-bold"
+                  className="px-4 py-2 bg-neutral-900 hover:bg-neutral-800 text-white rounded-xl font-bold cursor-pointer"
                 >
                   Сохранить настройки
                 </button>
@@ -1696,7 +2239,7 @@ export const TestsView: React.FC = () => {
 
       {/* ADMIN ADD/EDIT QUESTION MODAL */}
       {isQuestionModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
           <div className="relative w-full max-w-xl bg-white rounded-2xl shadow-2xl border border-neutral-200 p-6 max-h-[90vh] overflow-y-auto">
             <button
               onClick={() => setIsQuestionModalOpen(false)}
@@ -1933,12 +2476,16 @@ export const TestsView: React.FC = () => {
             {/* Exam Parameters Overview */}
             <div className="grid grid-cols-3 gap-2.5 text-center">
               <div className="p-3 bg-neutral-50 rounded-2xl border border-neutral-200">
-                <span className="text-[10px] text-neutral-400 font-bold uppercase block">Билет</span>
+                <span className="text-[10px] text-neutral-400 font-bold uppercase block">Вопросов</span>
                 <span className="text-base font-black text-neutral-900">
-                  {Math.min(
-                    examSettings.questionCount || 20,
-                    availableQuestions.filter((q) => q.includeInExam !== false).length
-                  )}{' '}
+                  {selectedExamTicket === 'random'
+                    ? Math.min(
+                        examSettings.questionCount || 20,
+                        availableQuestions.filter((q) => q.includeInExam !== false).length
+                      )
+                    : availableQuestions.filter(
+                        (q) => q.includeInExam !== false && (q.ticketNumber || 1) === selectedExamTicket
+                      ).length || examSettings.questionCount || 20}{' '}
                   вопр.
                 </span>
               </div>
@@ -1951,6 +2498,80 @@ export const TestsView: React.FC = () => {
               <div className="p-3 bg-neutral-50 rounded-2xl border border-neutral-200">
                 <span className="text-[10px] text-neutral-400 font-bold uppercase block">Допуск</span>
                 <span className="text-base font-black text-emerald-600">≤ 2 ошибок</span>
+              </div>
+            </div>
+
+            {/* Ticket Selection in Modal */}
+            <div className="p-3.5 bg-neutral-50 rounded-2xl border border-neutral-200 space-y-2">
+              {studentAssignedTicket && typeof studentAssignedTicket === 'number' && (
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded-2xl text-xs text-blue-900 flex items-center justify-between">
+                  <span className="font-bold">
+                    Вам преподавателем назначен <strong>Билет №{studentAssignedTicket}</strong>
+                  </span>
+                  <span className="px-2 py-0.5 bg-blue-600 text-white rounded-md text-[10px] font-bold">
+                    Назначен
+                  </span>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold text-neutral-800 flex items-center gap-1.5">
+                  <Ticket className="w-4 h-4 text-amber-600" />
+                  <span>Экзаменационный билет:</span>
+                </span>
+                <span className="text-neutral-500 font-semibold text-[11px]">
+                  {selectedExamTicket === 'random' ? 'Случайные вопросы из базы' : `Билет №${selectedExamTicket}`}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setSelectedExamTicket('random')}
+                  className={`p-2 rounded-xl border text-xs font-bold transition-all text-center cursor-pointer ${
+                    selectedExamTicket === 'random'
+                      ? 'bg-neutral-900 text-white border-neutral-900 shadow-xs'
+                      : 'bg-white text-neutral-700 border-neutral-200 hover:bg-neutral-100'
+                  }`}
+                >
+                  <div>Случайный</div>
+                  <div className="text-[10px] opacity-70 font-normal">Из базы</div>
+                </button>
+                {availableTickets.map((tNum) => {
+                  const qCount = availableQuestions.filter(
+                    (q) => q.includeInExam !== false && (q.ticketNumber || 1) === tNum
+                  ).length;
+                  const isOccupied =
+                    examSettings.uniqueTicketPerStudent !== false &&
+                    (examSettings.occupiedTickets || []).some(
+                      (o) => o.ticketNumber === tNum && o.studentId !== currentUser?.id
+                    );
+                  const occupiedInfo = (examSettings.occupiedTickets || []).find(
+                    (o) => o.ticketNumber === tNum && o.studentId !== currentUser?.id
+                  );
+
+                  return (
+                    <button
+                      key={tNum}
+                      type="button"
+                      disabled={isOccupied}
+                      onClick={() => setSelectedExamTicket(tNum)}
+                      title={isOccupied ? `Билет занят: ${occupiedInfo?.studentName}` : `Выбрать Билет №${tNum}`}
+                      className={`p-2 rounded-xl border text-xs font-bold transition-all text-center ${
+                        isOccupied
+                          ? 'bg-neutral-100 text-neutral-400 border-dashed border-neutral-300 opacity-60 cursor-not-allowed'
+                          : selectedExamTicket === tNum
+                          ? 'bg-amber-400 text-neutral-950 border-amber-500 shadow-xs font-black cursor-pointer'
+                          : 'bg-white text-neutral-700 border-neutral-200 hover:bg-neutral-100 cursor-pointer'
+                      }`}
+                    >
+                      <div>Билет №{tNum}</div>
+                      <div className="text-[10px] opacity-75 font-normal">
+                        {isOccupied ? `Занят` : `${qCount} вопр.`}
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -2014,15 +2635,19 @@ export const TestsView: React.FC = () => {
               <button
                 type="button"
                 disabled={!examAgreementChecked}
-                onClick={handleConfirmStartExam}
+                onClick={() => handleConfirmStartExam(selectedExamTicket)}
                 className={`px-6 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-xs ${
                   examAgreementChecked
-                    ? 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'
+                    ? 'bg-amber-500 hover:bg-amber-400 text-neutral-950 font-black cursor-pointer'
                     : 'bg-neutral-200 text-neutral-400 cursor-not-allowed'
                 }`}
               >
-                <CheckCircle2 className="w-4 h-4" />
-                <span>Начать экзамен</span>
+                <Play className="w-4 h-4 fill-current" />
+                <span>
+                  {selectedExamTicket === 'random'
+                    ? 'Начать экзамен (Случайный билет)'
+                    : `Начать экзамен (Билет №${selectedExamTicket})`}
+                </span>
               </button>
             </div>
           </div>
@@ -2090,19 +2715,38 @@ export const TestsView: React.FC = () => {
             </div>
 
             {/* Ticket parameters & Quick presets */}
-            <div className="p-3.5 bg-neutral-50 rounded-2xl border border-neutral-200 flex items-center justify-between gap-3 flex-wrap shrink-0">
-              <div className="flex items-center gap-4 flex-wrap text-xs">
+            <div className="p-3.5 bg-neutral-50 rounded-2xl border border-neutral-200 flex items-center justify-between gap-4 flex-wrap shrink-0">
+              <div className="flex items-center gap-6 flex-wrap text-xs">
+                {/* Custom Question Count */}
                 <div className="flex items-center gap-2">
                   <span className="font-bold text-neutral-700">Вопросов в билете:</span>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="number"
+                      min="5"
+                      max="100"
+                      value={examSettings.questionCount || 20}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10);
+                        if (!isNaN(val) && val > 0) {
+                          updateExamSettings({ questionCount: val });
+                        }
+                      }}
+                      className="w-16 px-2 py-1 bg-white border border-neutral-300 rounded-lg font-black text-center text-neutral-900 text-xs focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+                      title="Введите любое количество вопросов для экзамена"
+                    />
+                    <span className="text-neutral-400 text-[11px]">шт.</span>
+                  </div>
                   <div className="flex items-center gap-1">
                     {[10, 20, 30, 40].map((count) => (
                       <button
                         key={count}
+                        type="button"
                         onClick={() => updateExamSettings({ questionCount: count })}
-                        className={`px-2.5 py-1 rounded-lg font-bold text-xs transition-colors ${
+                        className={`px-2 py-1 rounded-lg font-bold text-xs transition-colors ${
                           (examSettings.questionCount || 20) === count
-                            ? 'bg-neutral-900 text-white'
-                            : 'bg-white border text-neutral-700 hover:bg-neutral-100'
+                            ? 'bg-neutral-900 text-white shadow-xs'
+                            : 'bg-white border text-neutral-600 hover:bg-neutral-100'
                         }`}
                       >
                         {count}
@@ -2111,20 +2755,39 @@ export const TestsView: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Custom Time Limit */}
                 <div className="flex items-center gap-2">
                   <span className="font-bold text-neutral-700">Время на экзамен:</span>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="number"
+                      min="1"
+                      max="180"
+                      value={examSettings.timeLimitMinutes || 20}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10);
+                        if (!isNaN(val) && val >= 0) {
+                          updateExamSettings({ timeLimitMinutes: val });
+                        }
+                      }}
+                      className="w-16 px-2 py-1 bg-white border border-neutral-300 rounded-lg font-black text-center text-neutral-900 text-xs focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+                      title="Введите любое количество минут (0 = без ограничения)"
+                    />
+                    <span className="text-neutral-400 text-[11px]">мин</span>
+                  </div>
                   <div className="flex items-center gap-1">
                     {[15, 20, 25, 30].map((mins) => (
                       <button
                         key={mins}
+                        type="button"
                         onClick={() => updateExamSettings({ timeLimitMinutes: mins })}
-                        className={`px-2.5 py-1 rounded-lg font-bold text-xs transition-colors ${
+                        className={`px-2 py-1 rounded-lg font-bold text-xs transition-colors ${
                           (examSettings.timeLimitMinutes || 20) === mins
-                            ? 'bg-neutral-900 text-white'
-                            : 'bg-white border text-neutral-700 hover:bg-neutral-100'
+                            ? 'bg-neutral-900 text-white shadow-xs'
+                            : 'bg-white border text-neutral-600 hover:bg-neutral-100'
                         }`}
                       >
-                        {mins} мин
+                        {mins} м
                       </button>
                     ))}
                   </div>
@@ -2504,6 +3167,49 @@ export const TestsView: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* UNIFIED EXAM & TICKET ADMIN MODAL */}
+      <ExamAdminModal
+        isOpen={isExamAdminModalOpen}
+        onClose={() => setIsExamAdminModalOpen(false)}
+        defaultTab={examAdminTab}
+        onEditQuestion={(q) => {
+          setEditingQuestionId(q.id);
+          setQFormData({
+            categoryId: q.categoryId,
+            questionText: q.questionText,
+            options: [...q.options, '', '', ''].slice(0, 4),
+            correctAnswerIndex: q.correctAnswerIndex,
+            explanation: q.explanation || '',
+            imageUrl: q.imageUrl || '',
+            signId: q.signId || '',
+            groupTarget: q.groupTarget || 'all',
+            categoryType: q.categoryType || 'all',
+            difficulty: q.difficulty || 'medium',
+            includeInExam: q.includeInExam !== false,
+            ticketNumber: q.ticketNumber || 1,
+          });
+          setIsQuestionModalOpen(true);
+        }}
+        onCreateQuestionInTicket={(tNum) => {
+          setEditingQuestionId(null);
+          setQFormData({
+            categoryId: categories[0]?.id || '',
+            questionText: '',
+            options: ['', '', '', ''],
+            correctAnswerIndex: 0,
+            explanation: '',
+            imageUrl: '',
+            signId: '',
+            groupTarget: 'all',
+            categoryType: 'all',
+            difficulty: 'medium',
+            includeInExam: true,
+            ticketNumber: tNum,
+          });
+          setIsQuestionModalOpen(true);
+        }}
+      />
     </div>
   );
 };

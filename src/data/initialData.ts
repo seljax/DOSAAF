@@ -43,6 +43,8 @@ export const INITIAL_STUDENTS: StudentAccount[] = [
     },
     canTakeTests: true,
     canTakeExam: true,
+    examAttemptsAllowed: 1,
+    examAttemptsUsed: 0,
     notes: 'Справка медкомиссии сдана, автодром 12 часов откатано',
     createdAt: 1726080000000,
     lastLoginAt: 1726150000000,
@@ -63,7 +65,9 @@ export const INITIAL_STUDENTS: StudentAccount[] = [
       schedule: true,
     },
     canTakeTests: true,
-    canTakeExam: false, // временно закрыт доступ к экзамену для демонстрации разграничения
+    canTakeExam: false, // доступ закрыт администратором
+    examAttemptsAllowed: 1,
+    examAttemptsUsed: 0,
     notes: 'Повторить тему "Проезд перекрестков" перед сдачей экзамена',
     createdAt: 1726085000000,
     lastLoginAt: 1726140000000,
@@ -85,6 +89,8 @@ export const INITIAL_STUDENTS: StudentAccount[] = [
     },
     canTakeTests: true,
     canTakeExam: true,
+    examAttemptsAllowed: 1,
+    examAttemptsUsed: 0,
     notes: 'Все темы освоены',
     createdAt: 1726090000000,
   },
@@ -105,6 +111,8 @@ export const INITIAL_STUDENTS: StudentAccount[] = [
     },
     canTakeTests: true,
     canTakeExam: true,
+    examAttemptsAllowed: 1,
+    examAttemptsUsed: 0,
     notes: 'Направление ДОСААФ: подготовка водителя категории «C» (КамАЗ-4350)',
     createdAt: 1726095000000,
     lastLoginAt: 1726160000000,
@@ -148,11 +156,17 @@ export const INITIAL_GROUPS: GroupConfig[] = [
 ];
 
 export const INITIAL_EXAM_SETTINGS: ExamSettings = {
-  isOpen: false, // Closed for students until admin enables it
+  isOpen: true, // Exam module is accessible, individual student access is managed per student
   questionCount: 20, // 20 questions
   timeLimitMinutes: 20, // 20 minutes
   testTimeLimitMinutes: 15, // 15 minutes for regular category tests (0 = unlimited)
   passingPercent: 90, // 90% (max 2 mistakes in 20 questions)
+  defaultAllowedAttempts: 1, // Default attempts per student
+  totalTickets: 40, // Maximum 40 tickets
+  showImmediateFeedback: false, // Default: answers and explanations only at end of exam!
+  allowQuestionNavigation: false, // Default: cannot switch between questions during exam!
+  uniqueTicketPerStudent: true, // Default: if a cadet chose a ticket, it becomes unavailable for others!
+  occupiedTickets: [],
 };
 
 export const INITIAL_MATERIALS: LearningMaterial[] = [
@@ -554,6 +568,8 @@ export const INITIAL_QUESTIONS: Question[] = [
     correctAnswerIndex: 2,
     explanation: 'Согласно п. 13.11 и 13.12 ПДД РФ, на перекрестке равнозначных дорог водитель обязан уступить дорогу ТС, приближающимся справа. При повороте налево водитель также обязан уступить дорогу встречным ТС, движущимся прямо или направо.',
     difficulty: 'medium',
+    includeInExam: true,
+    ticketNumber: 1,
   },
   {
     id: 'q-2',
@@ -567,6 +583,8 @@ export const INITIAL_QUESTIONS: Question[] = [
     correctAnswerIndex: 0,
     explanation: 'Желтый мигающий сигнал светофора информирует о нерегулируемом перекрестке (п. 6.2 и 13.3 ПДД). На нерегулируемом равнозначном перекрестке трамвай имеет преимущество перед безрельсовыми ТС независимо от направления его движения (п. 13.11 ПДД).',
     difficulty: 'medium',
+    includeInExam: true,
+    ticketNumber: 1,
   },
   {
     id: 'q-3',
@@ -582,6 +600,8 @@ export const INITIAL_QUESTIONS: Question[] = [
     explanation: 'Знак 3.1 "Въезд запрещен" запрещает въезд всех транспортных средств в данном направлении (за исключением маршрутных ТС). Знак 3.2 разрешает въезд жителям, обслуживающим предприятия и инвалидам.',
     signId: 'sign-3-1',
     difficulty: 'easy',
+    includeInExam: true,
+    ticketNumber: 1,
   },
   {
     id: 'q-4',
@@ -597,6 +617,8 @@ export const INITIAL_QUESTIONS: Question[] = [
     explanation: 'Знак 2.5 требует обязательной полной остановки перед стоп-линией, а если её нет — перед краем пересекаемой проезжей части, чтобы убедиться в отсутствии помех (п. 2.5 Приложения 1 к ПДД).',
     signId: 'sign-2-5',
     difficulty: 'easy',
+    includeInExam: true,
+    ticketNumber: 1,
   },
   {
     id: 'q-5',
@@ -611,6 +633,8 @@ export const INITIAL_QUESTIONS: Question[] = [
     correctAnswerIndex: 1,
     explanation: 'В соответствии с п. 8.1 ПДД, въезд на перекресток с круговым движением всегда сопряжен с маневром поворота направо, поэтому включается правый указатель поворота. Левый включается только при последующем перестроении на внутренние полосы кольца.',
     difficulty: 'medium',
+    includeInExam: true,
+    ticketNumber: 1,
   },
   {
     id: 'q-6',
@@ -625,6 +649,8 @@ export const INITIAL_QUESTIONS: Question[] = [
     correctAnswerIndex: 1,
     explanation: 'Согласно п. 8.4 ПДД РФ, при одновременном перестроении транспортных средств, движущихся попутно, водитель, находящийся слева, должен уступить дорогу транспортному средству, находящемуся справа.',
     difficulty: 'easy',
+    includeInExam: true,
+    ticketNumber: 2,
   },
   {
     id: 'q-7',
@@ -639,6 +665,8 @@ export const INITIAL_QUESTIONS: Question[] = [
     correctAnswerIndex: 1,
     explanation: 'В соответствии с п. 10.2 и 17.2 ПДД РФ, в жилых зонах и на дворовых территориях скорость движения транспортных средств не должна превышать 20 км/ч. Пешеходы имеют преимущество на всей ширине проезжей части.',
     difficulty: 'easy',
+    includeInExam: true,
+    ticketNumber: 2,
   },
   {
     id: 'q-8',
@@ -654,6 +682,8 @@ export const INITIAL_QUESTIONS: Question[] = [
     explanation: 'При выключенном сцеплении или нейтрали на МКПП автомобиль лишается торможения двигателем. Вся кинетическая энергия гасится колесными тормозными механизмами, что ведет к их быстрому перегреву, закипанию тормозной жидкости и полному отказу тормозов.',
     groupTarget: 'group7_mkpp',
     difficulty: 'hard',
+    includeInExam: true,
+    ticketNumber: 2,
   },
   {
     id: 'q-9',
@@ -669,6 +699,8 @@ export const INITIAL_QUESTIONS: Question[] = [
     explanation: 'На автомобилях с АКПП установлена механическая и электронная блокировка стартера. Запуск двигателя возможен исключительно в положениях селектора "P" (Parking) или "N" (Neutral) при обязательно выжатой педали тормоза во избежание самопроизвольного движения автомобиля.',
     groupTarget: 'group8_akpp',
     difficulty: 'medium',
+    includeInExam: true,
+    ticketNumber: 2,
   },
   {
     id: 'q-10',
@@ -683,6 +715,8 @@ export const INITIAL_QUESTIONS: Question[] = [
     correctAnswerIndex: 1,
     explanation: 'На переднеприводном автомобиле ведущие колеса тянут автомобиль за собой. Для выхода из заноса необходимо повернуть руль в сторону заноса и слегка увеличить подачу топлива (добавить газ), чтобы передние колеса вытянули машину из заноса. Тормозить категорически нельзя!',
     difficulty: 'hard',
+    includeInExam: true,
+    ticketNumber: 2,
   },
   {
     id: 'q-c1',
@@ -699,6 +733,8 @@ export const INITIAL_QUESTIONS: Question[] = [
     categoryType: 'C',
     groupTarget: 'group3_c',
     difficulty: 'medium',
+    includeInExam: true,
+    ticketNumber: 3,
   },
   {
     id: 'q-c2',
@@ -715,6 +751,8 @@ export const INITIAL_QUESTIONS: Question[] = [
     categoryType: 'C',
     groupTarget: 'group3_c',
     difficulty: 'easy',
+    includeInExam: true,
+    ticketNumber: 3,
   },
   {
     id: 'q-c3',
@@ -730,6 +768,8 @@ export const INITIAL_QUESTIONS: Question[] = [
     explanation: 'Знак 3.4 «Движение грузовых автомобилей запрещено» запрещает движение грузовых автомобилей и составов ТС с разрешенной максимальной массой более 3,5 тонн (если на знаке не указана конкретная масса).',
     categoryType: 'C',
     difficulty: 'easy',
+    includeInExam: true,
+    ticketNumber: 3,
   },
   {
     id: 'q-c4',
@@ -746,6 +786,8 @@ export const INITIAL_QUESTIONS: Question[] = [
     categoryType: 'C',
     groupTarget: 'group3_c',
     difficulty: 'medium',
+    includeInExam: true,
+    ticketNumber: 3,
   },
   {
     id: 'q-c5',
@@ -761,6 +803,8 @@ export const INITIAL_QUESTIONS: Question[] = [
     explanation: 'Согласно п. 20.4 ПДД РФ, буксировка транспортных средств с недействующей тормозной системой на гибкой сцепке категорически ЗАПРЕЩАЕТСЯ! В таких случаях допускается только буксировка на жесткой сцепке либо методом частичной погрузки.',
     categoryType: 'C',
     difficulty: 'hard',
+    includeInExam: true,
+    ticketNumber: 3,
   },
   {
     id: 'q-c6',
@@ -776,6 +820,53 @@ export const INITIAL_QUESTIONS: Question[] = [
     explanation: 'Согласно п. 22.1 ПДД РФ, перевозка людей в кузове грузового автомобиля с бортовой платформой разрешается водителям, имеющим удостоверение на право управления транспортным средством категории «C» или подкатегории «C1» в течение не менее 3 лет.',
     categoryType: 'C',
     difficulty: 'hard',
+    includeInExam: true,
+    ticketNumber: 3,
+  },
+  {
+    id: 'q-11',
+    categoryId: 'cat-speed-stopping',
+    questionText: 'Разрешается ли водителю превышать максимальную скорость, определенную технической характеристикой транспортного средства?',
+    options: [
+      'Запрещается во всех случаях',
+      'Разрешается только при выполнении обгона',
+      'Разрешается только вне населенных пунктов на автомагистралях',
+    ],
+    correctAnswerIndex: 0,
+    explanation: 'В соответствии с п. 10.5 ПДД РФ, водителю категорически запрещается превышать максимальную скорость, определенную технической характеристикой транспортного средства, а также скорость, указанную на опознавательном знаке «Ограничение скорости».',
+    difficulty: 'easy',
+    includeInExam: true,
+    ticketNumber: 4,
+  },
+  {
+    id: 'q-12',
+    categoryId: 'cat-safety-firstaid',
+    questionText: 'Какое расстояние должно обеспечиваться между автомобилями при буксировке на жесткой сцепке?',
+    options: [
+      'Не более 4 метров',
+      'От 4 до 6 метров',
+      'Не более 2 метров',
+    ],
+    correctAnswerIndex: 0,
+    explanation: 'Согласно п. 20.3 ПДД РФ, при буксировке на жесткой сцепке расстояние между транспортными средствами должно быть не более 4 метров. При гибкой сцепке — от 4 до 6 метров.',
+    difficulty: 'medium',
+    includeInExam: true,
+    ticketNumber: 4,
+  },
+  {
+    id: 'q-13',
+    categoryId: 'cat-signs',
+    questionText: 'Действие каких из перечисленных знаков НЕ распространяется на маршрутные транспортные средства?',
+    options: [
+      'Знаков 3.1 - 3.3, 3.18.1, 3.18.2, 3.19, 3.27',
+      'Только знака 3.1 "Въезд запрещен"',
+      'Только знака 3.27 "Остановка запрещена"',
+    ],
+    correctAnswerIndex: 0,
+    explanation: 'Согласно Приложению 1 к ПДД РФ, действие знаков 3.1–3.3, 3.18.1, 3.18.2, 3.19, 3.27 не распространяется на маршрутные транспортные средства.',
+    difficulty: 'hard',
+    includeInExam: true,
+    ticketNumber: 4,
   },
 ];
 
@@ -1134,8 +1225,8 @@ export const INITIAL_NAV_TABS: NavTabConfig[] = [
 ];
 
 export const INITIAL_SITE_INFO: SiteInfoSettings = {
-  version: 'v0.07',
-  releaseDate: '15.09.2026',
+  version: 'v.0.08',
+  releaseDate: '16.09.2026',
   developer: 'Мельник Сергей (SelJax)',
   schoolName: 'Автошкола ДОСААФ',
   description:
@@ -1175,6 +1266,17 @@ export const INITIAL_SITE_INFO: SiteInfoSettings = {
     },
   ],
   changelog: [
+    {
+      version: 'v.0.08',
+      date: '16.09.2026',
+      changes: [
+        'Внедрен выбор экзаменационного билета курсанту при сдаче государственного теоретического экзамена (случайный или конкретный билет 1, 2, 3...).',
+        'Добавлена возможность редактировать, добавлять и переносить вопросы внутри каждого экзаменационного билета для администратора автошколы.',
+        'Исправлено отображение окна редактирования/создания вопроса: теперь модальное окно гарантированно открывается спереди (поверх) окна управления экзаменом.',
+        'Добавлена кнопка «Пропустить вопрос» во всех тестах и экзаменах с возможностью вернуться к пропущенным вопросам в любой момент.',
+        'Внедрена интерактивная полоса номеров вопросов (1..20) с наглядной цветовой индикацией отвеченных, пропущенных и текущих вопросов для быстрой навигации.',
+      ],
+    },
     {
       version: 'v0.07',
       date: '15.09.2026',

@@ -19,13 +19,24 @@ export const GroupSettingsModal: React.FC<GroupSettingsModalProps> = ({ isOpen, 
   const [newGroupCategory, setNewGroupCategory] = useState<'B' | 'C'>('B');
   const [newGroupDesc, setNewGroupDesc] = useState('');
 
-  // Synchronize when opened
+  // Synchronize when opened & ESC listener
   useEffect(() => {
     if (isOpen) {
       setLocalGroups(groups);
       setIsAddingNew(false);
     }
   }, [isOpen, groups]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -94,8 +105,15 @@ export const GroupSettingsModal: React.FC<GroupSettingsModalProps> = ({ isOpen, 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-xs">
-      <div className="relative w-full max-w-xl bg-white rounded-3xl shadow-2xl border border-neutral-200 p-6 sm:p-7 max-h-[90vh] overflow-y-auto">
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-4 bg-black/75 overflow-y-auto"
+      style={{ isolation: 'isolate' }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="relative w-full max-w-xl bg-white rounded-3xl shadow-2xl border border-neutral-200 p-6 sm:p-7 max-h-[90vh] overflow-y-auto my-auto"
+      >
         <button
           onClick={onClose}
           className="absolute right-4 top-4 p-2 text-neutral-400 hover:text-neutral-700 rounded-xl"

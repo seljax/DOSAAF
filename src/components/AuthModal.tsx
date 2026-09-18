@@ -202,7 +202,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, defaultTa
                   required
                   value={studentInput}
                   onChange={(e) => setStudentInput(e.target.value)}
-                  placeholder="Например: Иванов или ivanov"
+                  placeholder="Введите фамилию или логин"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-neutral-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
                 />
               </div>
