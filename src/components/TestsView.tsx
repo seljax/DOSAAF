@@ -6,6 +6,7 @@ import { ImageInputControl } from './ImageInputControl';
 import { EditableDesignBlock } from './EditableDesignBlock';
 import { useDesignEditor } from '../context/DesignEditorContext';
 import confetti from 'canvas-confetti';
+import { playSuccessSound, playFailSound } from '../utils/sound';
 import { ExamAdminModal } from './ExamAdminModal';
 import {
   CheckCircle2,
@@ -280,6 +281,9 @@ export const TestsView: React.FC = () => {
         spread: 70,
         origin: { y: 0.6 },
       });
+      playSuccessSound();
+    } else {
+      playFailSound();
     }
   };
 
