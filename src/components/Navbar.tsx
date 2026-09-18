@@ -54,9 +54,6 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
   const [isStudentModalOpen, setIsStudentModalOpen] = useState(false);
   const [isNavTabsModalOpen, setIsNavTabsModalOpen] = useState(false);
 
-  const group1 = groups.find((g) => g.id === 'group7_mkpp') || groups[0];
-  const group2 = groups.find((g) => g.id === 'group8_akpp') || groups[1];
-
   const handleExport = () => {
     const jsonStr = exportDataJson();
     const blob = new Blob([jsonStr], { type: 'application/json' });
@@ -231,7 +228,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
         >
           <div className="max-w-7xl mx-auto px-3 sm:px-6">
             <div className="flex items-center justify-between h-14 sm:h-16 gap-2">
-              {/* Logo and Group Brand (Wrapped in EditableDesignBlock) */}
+              {/* Logo and Brand (БЕЗ перечисления групп) */}
               <EditableDesignBlock
                 id="header_brand"
                 label="Логотип и Название ДОСААФ"
@@ -262,226 +259,212 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
                           {badge || 'Кат. B / C'}
                         </span>
                       </div>
-                      <div className="flex items-center gap-1 text-[10px] sm:text-xs text-neutral-500 font-medium overflow-hidden max-w-[220px] sm:max-w-none mt-0.5">
-                        {groups.slice(0, 4).map((g, idx) => (
-                          <React.Fragment key={g.id}>
-                            {idx > 0 && <span className="text-neutral-300">•</span>}
-                            <span className={g.category === 'C' ? 'text-amber-700 font-semibold' : g.transmission === 'АКПП' ? 'text-indigo-700 font-semibold' : 'text-blue-700 font-semibold'}>
-                              Гр. №{g.number} ({g.category === 'C' ? 'Кат. C' : g.transmission})
-                            </span>
-                          </React.Fragment>
-                        ))}
-                        {groups.length > 4 && (
-                          <span className="text-neutral-400 text-[10px]">+{groups.length - 4}</span>
-                        )}
-                      </div>
                     </div>
                   </div>
                 )}
               </EditableDesignBlock>
 
-            {/* Desktop Navigation Links */}
-            <nav className="hidden lg:flex items-center gap-1 text-sm font-medium">
-              {[...navTabs]
-                .filter((t) => t.isVisible)
-                .sort((a, b) => a.order - b.order)
-                .map((item) => {
-                  const hasAccess = canAccessTab(item.id);
-                  const isActive = activeTab === item.id;
+              {/* Desktop Navigation Links */}
+              <nav className="hidden lg:flex items-center gap-1 text-sm font-medium">
+                {[...navTabs]
+                  .filter((t) => t.isVisible)
+                  .sort((a, b) => a.order - b.order)
+                  .map((item) => {
+                    const hasAccess = canAccessTab(item.id);
+                    const isActive = activeTab === item.id;
+                    const isTabLockedByExam = isExamInProgress && item.id !== 'tests';
 
-                  const isTabLockedByExam = isExamInProgress && item.id !== 'tests';
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => {
+                          if (isTabLockedByExam) {
+                            alert('Во время сдачи государственного экзамена переход в другие разделы заблокирован для исключения списывания!');
+                            return;
+                          }
+                          if (hasAccess) {
+                            setActiveTab(item.id);
+                          } else {
+                            alert(
+                              `Доступ к разделу "${item.label}" ограничен администратором для вашей учётной записи.`
+                            );
+                          }
+                        }}
+                        disabled={isTabLockedByExam}
+                        className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
+                          isTabLockedByExam
+                            ? 'text-neutral-400 opacity-50 cursor-not-allowed'
+                            : !hasAccess
+                            ? 'text-neutral-400 opacity-60 hover:bg-neutral-100/50 cursor-not-allowed'
+                            : isActive
+                            ? 'bg-neutral-100 text-neutral-900 font-semibold'
+                            : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50'
+                        }`}
+                        title={isTabLockedByExam ? 'Переход заблокирован во время экзамена' : !hasAccess ? 'Доступ ограничен администратором' : undefined}
+                      >
+                        <span>{item.label}</span>
+                        {(isTabLockedByExam || !hasAccess) && <Lock className="w-3 h-3 text-neutral-400 shrink-0" />}
+                      </button>
+                    );
+                  })}
 
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => {
-                        if (isTabLockedByExam) {
-                          alert('Во время сдачи государственного экзамена переход в другие разделы заблокирован для исключения списывания!');
-                          return;
-                        }
-                        if (hasAccess) {
-                          setActiveTab(item.id);
-                        } else {
-                          alert(
-                            `Доступ к разделу "${item.label}" ограничен администратором для вашей учётной записи.`
-                          );
-                        }
-                      }}
-                      disabled={isTabLockedByExam}
-                      className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
-                        isTabLockedByExam
-                          ? 'text-neutral-400 opacity-50 cursor-not-allowed'
-                          : !hasAccess
-                          ? 'text-neutral-400 opacity-60 hover:bg-neutral-100/50 cursor-not-allowed'
-                          : isActive
-                          ? 'bg-neutral-100 text-neutral-900 font-semibold'
-                          : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50'
-                      }`}
-                      title={isTabLockedByExam ? 'Переход заблокирован во время экзамена' : !hasAccess ? 'Доступ ограничен администратором' : undefined}
-                    >
-                      <span>{item.label}</span>
-                      {(isTabLockedByExam || !hasAccess) && <Lock className="w-3 h-3 text-neutral-400 shrink-0" />}
-                    </button>
-                  );
-                })}
-
-              {/* Profile Tab: Available when student is logged in, OR when administrator is logged in */}
-              {(isAdmin || (currentUser && Boolean(currentUser.name))) && (
-                <button
-                  onClick={() => {
-                    if (isExamInProgress) {
-                      alert('Во время сдачи государственного экзамена переход в профиль заблокирован!');
-                      return;
-                    }
-                    setActiveTab('profile');
-                  }}
-                  disabled={isExamInProgress}
-                  className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
-                    isExamInProgress
-                      ? 'text-neutral-400 opacity-50 cursor-not-allowed'
-                      : activeTab === 'profile'
-                      ? isAdmin
-                        ? 'bg-amber-100 text-amber-900 font-bold'
-                        : 'bg-blue-100 text-blue-900 font-bold'
-                      : isAdmin
-                      ? 'text-amber-800 hover:bg-amber-50 font-semibold'
-                      : 'text-blue-700 hover:bg-blue-50 font-semibold'
-                  }`}
-                  title={isExamInProgress ? 'Заблокировано во время экзамена' : isAdmin ? 'Кабинет администратора' : 'Личный кабинет курсанта'}
-                >
-                  <UserIcon className="w-3.5 h-3.5" />
-                  <span>Профиль</span>
-                  {isExamInProgress && <Lock className="w-3 h-3 text-neutral-400 shrink-0" />}
-                </button>
-              )}
-
-              {/* Statistics is visible ONLY for Admin */}
-              {isAdmin && (
-                <button
-                  onClick={() => {
-                    if (isExamInProgress) {
-                      alert('Во время экзамена переход заблокирован!');
-                      return;
-                    }
-                    setActiveTab('stats');
-                  }}
-                  disabled={isExamInProgress}
-                  className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1 ${
-                    isExamInProgress
-                      ? 'text-neutral-400 opacity-50 cursor-not-allowed'
-                      : activeTab === 'stats'
-                      ? 'bg-amber-100 text-amber-900 font-bold'
-                      : 'text-amber-800 hover:bg-amber-50 font-semibold'
-                  }`}
-                >
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>Ведомость</span>
-                </button>
-              )}
-            </nav>
-
-            {/* Group Filter & User Auth Button */}
-            <div className="flex items-center gap-1.5 sm:gap-2">
-              {/* Group Pill Selector */}
-              <div className={`flex items-center p-0.5 bg-neutral-100 rounded-lg border border-neutral-200 text-xs overflow-x-auto max-w-[200px] sm:max-w-none ${
-                isExamInProgress ? 'opacity-50 pointer-events-none' : ''
-              }`}>
-                <button
-                  type="button"
-                  disabled={isExamInProgress}
-                  onClick={() => setSelectedGroupTab('all')}
-                  className={`px-2 py-1 rounded-md transition-all font-medium shrink-0 ${
-                    selectedGroupTab === 'all'
-                      ? 'bg-white text-neutral-900 shadow-xs font-semibold'
-                      : 'text-neutral-500 hover:text-neutral-900'
-                  }`}
-                >
-                  Все
-                </button>
-                {groups.map((g) => (
+                {/* Profile Tab */}
+                {(isAdmin || (currentUser && Boolean(currentUser.name))) && (
                   <button
-                    key={g.id}
-                    type="button"
+                    onClick={() => {
+                      if (isExamInProgress) {
+                        alert('Во время сдачи государственного экзамена переход в профиль заблокирован!');
+                        return;
+                      }
+                      setActiveTab('profile');
+                    }}
                     disabled={isExamInProgress}
-                    onClick={() => setSelectedGroupTab(g.id)}
-                    className={`px-2 py-1 rounded-md transition-all font-medium shrink-0 ${
-                      selectedGroupTab === g.id
-                        ? g.category === 'C'
-                          ? 'bg-amber-600 text-white shadow-xs font-semibold'
-                          : g.transmission === 'АКПП'
-                          ? 'bg-indigo-600 text-white shadow-xs font-semibold'
-                          : 'bg-blue-600 text-white shadow-xs font-semibold'
-                        : 'text-neutral-500 hover:text-neutral-900'
+                    className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
+                      isExamInProgress
+                        ? 'text-neutral-400 opacity-50 cursor-not-allowed'
+                        : activeTab === 'profile'
+                        ? isAdmin
+                          ? 'bg-amber-100 text-amber-900 font-bold'
+                          : 'bg-blue-100 text-blue-900 font-bold'
+                        : isAdmin
+                        ? 'text-amber-800 hover:bg-amber-50 font-semibold'
+                        : 'text-blue-700 hover:bg-blue-50 font-semibold'
                     }`}
-                    title={`${g.name}: ${g.categoryLabel || g.transmissionLabel}`}
+                    title={isExamInProgress ? 'Заблокировано во время экзамена' : isAdmin ? 'Кабинет администратора' : 'Личный кабинет курсанта'}
                   >
-                    Гр. {g.number} {g.category === 'C' ? '(C)' : ''}
+                    <UserIcon className="w-3.5 h-3.5" />
+                    <span>Профиль</span>
+                    {isExamInProgress && <Lock className="w-3 h-3 text-neutral-400 shrink-0" />}
                   </button>
-                ))}
+                )}
+
+                {/* Statistics is visible ONLY for Admin */}
                 {isAdmin && (
                   <button
-                    type="button"
+                    onClick={() => {
+                      if (isExamInProgress) {
+                        alert('Во время экзамена переход заблокирован!');
+                        return;
+                      }
+                      setActiveTab('stats');
+                    }}
                     disabled={isExamInProgress}
-                    onClick={() => setIsGroupModalOpen(true)}
-                    className="px-1.5 py-1 text-neutral-500 hover:text-amber-700 hover:bg-amber-50 rounded-md transition-colors shrink-0"
-                    title="Настройка учебных групп"
+                    className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1 ${
+                      isExamInProgress
+                        ? 'text-neutral-400 opacity-50 cursor-not-allowed'
+                        : activeTab === 'stats'
+                        ? 'bg-amber-100 text-amber-900 font-bold'
+                        : 'text-amber-800 hover:bg-amber-50 font-semibold'
+                    }`}
                   >
-                    <Layers className="w-3.5 h-3.5" />
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>Ведомость</span>
                   </button>
                 )}
-              </div>
+              </nav>
 
-              {/* User / Admin pill button - Opens Auth Modal for login / switch / logout */}
-              <button
-                disabled={isExamInProgress}
-                onClick={() => {
-                  if (isExamInProgress) {
-                    alert('Во время сдачи государственного экзамена выход и смена аккаунта заблокированы!');
-                    return;
+              {/* Group Filter & User Auth Button */}
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                {/* Group Pill Selector — ОСТАВЛЯЕМ */}
+                <div className={`flex items-center p-0.5 bg-neutral-100 rounded-lg border border-neutral-200 text-xs overflow-x-auto max-w-[200px] sm:max-w-none ${
+                  isExamInProgress ? 'opacity-50 pointer-events-none' : ''
+                }`}>
+                  <button
+                    type="button"
+                    disabled={isExamInProgress}
+                    onClick={() => setSelectedGroupTab('all')}
+                    className={`px-2 py-1 rounded-md transition-all font-medium shrink-0 ${
+                      selectedGroupTab === 'all'
+                        ? 'bg-white text-neutral-900 shadow-xs font-semibold'
+                        : 'text-neutral-500 hover:text-neutral-900'
+                    }`}
+                  >
+                    Все
+                  </button>
+                  {groups.map((g) => (
+                    <button
+                      key={g.id}
+                      type="button"
+                      disabled={isExamInProgress}
+                      onClick={() => setSelectedGroupTab(g.id)}
+                      className={`px-2 py-1 rounded-md transition-all font-medium shrink-0 ${
+                        selectedGroupTab === g.id
+                          ? g.category === 'C'
+                            ? 'bg-amber-600 text-white shadow-xs font-semibold'
+                            : g.transmission === 'АКПП'
+                            ? 'bg-indigo-600 text-white shadow-xs font-semibold'
+                            : 'bg-blue-600 text-white shadow-xs font-semibold'
+                          : 'text-neutral-500 hover:text-neutral-900'
+                      }`}
+                      title={`${g.name}: ${g.categoryLabel || g.transmissionLabel}`}
+                    >
+                      Гр. {g.number} {g.category === 'C' ? '(C)' : ''}
+                    </button>
+                  ))}
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      disabled={isExamInProgress}
+                      onClick={() => setIsGroupModalOpen(true)}
+                      className="px-1.5 py-1 text-neutral-500 hover:text-amber-700 hover:bg-amber-50 rounded-md transition-colors shrink-0"
+                      title="Настройка учебных групп"
+                    >
+                      <Layers className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* User / Admin pill button */}
+                <button
+                  disabled={isExamInProgress}
+                  onClick={() => {
+                    if (isExamInProgress) {
+                      alert('Во время сдачи государственного экзамена выход и смена аккаунта заблокированы!');
+                      return;
+                    }
+                    setIsAuthOpen(true);
+                  }}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-medium transition-all ${
+                    isExamInProgress
+                      ? 'border-neutral-200 bg-neutral-100 text-neutral-400 opacity-60 cursor-not-allowed'
+                      : isAdmin
+                      ? 'border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 cursor-pointer'
+                      : currentUser && currentUser.name
+                      ? 'border-blue-300 bg-blue-50 text-blue-900 font-semibold hover:bg-blue-100 cursor-pointer'
+                      : 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700 shadow-xs cursor-pointer'
+                  }`}
+                  title={
+                    isAdmin
+                      ? `Администратор (${adminCredentials.login}) — кликните для управления доступом`
+                      : currentUser && currentUser.name
+                      ? `Курсант: ${currentUser.name} — кликните для выхода или смены`
+                      : 'Вход в систему ДОСААФ (Курсант / Администратор)'
                   }
-                  setIsAuthOpen(true);
-                }}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-medium transition-all ${
-                  isExamInProgress
-                    ? 'border-neutral-200 bg-neutral-100 text-neutral-400 opacity-60 cursor-not-allowed'
-                    : isAdmin
-                    ? 'border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 cursor-pointer'
-                    : currentUser && currentUser.name
-                    ? 'border-blue-300 bg-blue-50 text-blue-900 font-semibold hover:bg-blue-100 cursor-pointer'
-                    : 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700 shadow-xs cursor-pointer'
-                }`}
-                title={
-                  isAdmin
-                    ? `Администратор (${adminCredentials.login}) — кликните для управления доступом`
-                    : currentUser && currentUser.name
-                    ? `Курсант: ${currentUser.name} — кликните для выхода или смены`
-                    : 'Вход в систему ДОСААФ (Курсант / Администратор)'
-                }
-              >
-                {isAdmin ? (
-                  <>
-                    <ShieldCheck className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                    <span className="font-semibold hidden xs:inline">Админ ({adminCredentials.login})</span>
-                  </>
-                ) : currentUser && currentUser.name ? (
-                  <>
-                    <div className="w-4 h-4 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold shrink-0">
-                      {currentUser.name.charAt(0).toUpperCase()}
-                    </div>
-                    <span className="truncate max-w-[80px] sm:max-w-[110px] font-semibold">
-                      {currentUser.name}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <UserIcon className="w-3.5 h-3.5 shrink-0" />
-                    <span className="font-bold">Войти</span>
-                  </>
-                )}
-              </button>
+                >
+                  {isAdmin ? (
+                    <>
+                      <ShieldCheck className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                      <span className="font-semibold hidden xs:inline">Админ ({adminCredentials.login})</span>
+                    </>
+                  ) : currentUser && currentUser.name ? (
+                    <>
+                      <div className="w-4 h-4 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold shrink-0">
+                        {currentUser.name.charAt(0).toUpperCase()}
+                      </div>
+                      <span className="truncate max-w-[80px] sm:max-w-[110px] font-semibold">
+                        {currentUser.name}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <UserIcon className="w-3.5 h-3.5 shrink-0" />
+                      <span className="font-bold">Войти</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
         </EditableDesignBlock>
       </header>
 
