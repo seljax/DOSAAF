@@ -581,7 +581,7 @@ export const TestsView: React.FC = () => {
       userGroup: currentUser?.group || groups[0]?.id || '',
       userRole: currentUser?.isAdmin ? 'admin' : 'student',
       actionType: 'exam_started',
-      message: `🏁 Начал(а) сдачу государственного экзамена ДОСААФ (${ticketLabel})`,
+      message: `Начал(а) сдачу государственного экзамена ДОСААФ (${ticketLabel})`,
       details: `${ticketLabel} (${finalQuestions.length} вопр.). Лимит: ${Math.round(limitSec / 60)} мин. Включен строгий режим анти-списывания.`,
     });
 

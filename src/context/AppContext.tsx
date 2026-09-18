@@ -16,6 +16,7 @@ import {
 // ==================== API-ХРАНИЛИЩЕ ====================
 
 const API_URL = '/api/data';
+const AUTH_URL = '/api/auth';
 
 // Загрузить все данные с сервера
 async function loadAllFromServer(): Promise<Record<string, any>> {
@@ -43,7 +44,52 @@ async function saveToServer(key: string, value: any): Promise<void> {
   }
 }
 
-// Хук: состояние, синхронизированное с сервером
+// ==================== ХЕШИРОВАНИЕ ПАРОЛЕЙ ====================
+
+// Проверить, является ли строка bcrypt-хешем
+function isBcryptHash(str: string): boolean {
+  return /^\$2[aby]\$\d{2}\$/.test(str);
+}
+
+// Захешировать пароль через API
+async function hashPassword(password: string): Promise<string> {
+  try {
+    const res = await fetch(`${AUTH_URL}/hash`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || 'Hash failed');
+    return json.hash;
+  } catch (err) {
+    console.error('hashPassword error:', err);
+    throw err;
+  }
+}
+
+// Проверить пароль против хеша. Если строка — не хеш, сравниваем напрямую.
+async function verifyPassword(password: string, stored: string): Promise<boolean> {
+  // Если stored — не bcrypt-хеш, значит пароль в открытом виде (старые данные)
+  if (!isBcryptHash(stored)) {
+    return password === stored;
+  }
+  try {
+    const res = await fetch(`${AUTH_URL}/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password, hash: stored }),
+    });
+    const json = await res.json();
+    return Boolean(json.valid);
+  } catch (err) {
+    console.error('verifyPassword error:', err);
+    return false;
+  }
+}
+
+// ==================== ХУК ====================
+
 function useSyncedState<T>(
   key: string,
   initialValue: T,
@@ -58,7 +104,6 @@ function useSyncedState<T>(
     return initialValue;
   });
 
-  // Синхронизация с сервером — ТОЛЬКО ОДИН РАЗ при первой загрузке serverData
   const syncedRef = useRef(false);
   useEffect(() => {
     if (syncedRef.current) return;
@@ -97,7 +142,7 @@ interface AppContextType {
   loginAsStudent: (name: string, group: string) => void;
   updateStudentProfile: (name: string, group: string) => void;
   isStudentProfileComplete: boolean;
-  loginAsAdmin: (login: string, pass: string) => { success: boolean; error?: string };
+  loginAsAdmin: (login: string, pass: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   students: StudentAccount[];
   addStudent: (student: Omit<StudentAccount, 'id' | 'createdAt'>) => StudentAccount;
@@ -108,17 +153,18 @@ interface AppContextType {
   toggleStudentExamAccess: (id: string, canTakeExam: boolean) => void;
   resetStudentExamAttempts: (id: string) => void;
   setStudentExamAttempts: (id: string, attemptsAllowed: number, resetUsed?: boolean) => void;
-  loginStudentWithPassword: (loginOrName: string, password: string) => { success: boolean; error?: string };
-  changeStudentPassword: (oldPass: string, newPass: string) => { success: boolean; error?: string };
+  loginStudentWithPassword: (loginOrName: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  changeStudentPassword: (oldPass: string, newPass: string) => Promise<{ success: boolean; error?: string }>;
   canAccessTab: (tabId: string) => boolean;
   canStudentTakeTests: () => boolean;
   canStudentTakeExam: () => boolean;
   adminCredentials: AdminCredentials;
-  updateAdminCredentials: (oldPass: string, newLogin: string, newPass: string) => { success: boolean; error?: string };
+  updateAdminCredentials: (oldPass: string, newLogin: string, newPass: string) => Promise<{ success: boolean; error?: string }>;
   addRecoveryEmail: (email: string) => { success: boolean; error?: string };
-  removeRecoveryEmail: (email: string) => { success: boolean; error?: string };
-  requestPasswordResetCode: (email: string) => { success: boolean; code?: string; maskedEmail?: string; error?: string };
-  resetAdminPasswordWithCode: (code: string, newLogin: string, newPass: string) => { success: boolean; error?: string };
+  removeRecoveryEmail: (email: string) => void;
+  requestPasswordResetCode: (email: string) => Promise<{ success: boolean; maskedEmail?: string; error?: string }>;
+  verifyResetCode: (email: string, code: string) => Promise<{ success: boolean; error?: string }>;
+  resetAdminPasswordWithCode: (email: string, code: string, newLogin: string, newPass: string) => Promise<{ success: boolean; error?: string }>;
   activityLogs: ActivityLog[];
   addActivityLog: (log: Omit<ActivityLog, 'id' | 'timestamp' | 'dateStr' | 'timeStr'>) => void;
   clearActivityLogs: () => void;
@@ -202,8 +248,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     loadAllFromServer().then((data) => setServerData(data));
   }, []);
 
-  // ========== ЛОКАЛЬНАЯ СЕССИЯ (только для этого браузера) ==========
-
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     try {
       const saved = localStorage.getItem('avtoshkola_currentUser_v2');
@@ -238,8 +282,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem('avtoshkola_groupFilter_v2', group);
   };
 
-  // ========== ОБЩИЕ ДАННЫЕ (синхронизируются с сервером) ==========
-
   const [groups, setGroups] = useSyncedState<GroupConfig[]>('groups', INITIAL_GROUPS, serverData);
   const [signs, setSigns] = useSyncedState<RoadSign[]>('signs', INITIAL_SIGNS, serverData);
   const [rules, setRules] = useSyncedState<RoadRule[]>('rules', INITIAL_RULES, serverData);
@@ -260,10 +302,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [accessRequests, setAccessRequests] = useSyncedState<AccessRequest[]>('access_requests', INITIAL_ACCESS_REQUESTS, serverData);
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
 
-  const [passwordResetSession, setPasswordResetSession] = useState<{
-    code: string; email: string; expiresAt: number;
-  } | null>(null);
-
   useEffect(() => {
     const root = document.documentElement;
     root.classList.remove('dark', 'theme-dosaaf-navy');
@@ -281,7 +319,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const setAppTheme = (newTheme: AppTheme) => setAppThemeState(newTheme);
 
-  // ==================== ФУНКЦИИ ====================
+  // ==================== АВТОРИЗАЦИЯ ====================
 
   const loginAsStudent = (name: string, group: string) => {
     setCurrentUser({
@@ -305,19 +343,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     currentUser && currentUser.name && currentUser.name.trim().length >= 3 && currentUser.name.trim().includes(' ')
   );
 
-  const loginAsAdmin = (login: string, pass: string) => {
+  // Асинхронный вход админа с bcrypt-проверкой
+  const loginAsAdmin = async (login: string, pass: string): Promise<{ success: boolean; error?: string }> => {
     const cleanLogin = login.trim().toLowerCase();
     const adminLogin = adminCredentials.login.trim().toLowerCase();
-    if (cleanLogin === adminLogin && pass === adminCredentials.passwordHash) {
-      setCurrentUser({
-        id: 'admin-seljax',
-        name: `Администратор (${adminCredentials.login})`,
-        group: groups[0]?.id || 'group7_mkpp',
-        isAdmin: true,
-      });
-      return { success: true };
+
+    if (cleanLogin !== adminLogin) {
+      return { success: false, error: 'Неверный логин или пароль администратора' };
     }
-    return { success: false, error: 'Неверный логин или пароль администратора' };
+
+    const stored = adminCredentials.passwordHash || '';
+    const ok = await verifyPassword(pass, stored);
+
+    if (!ok) {
+      return { success: false, error: 'Неверный логин или пароль администратора' };
+    }
+
+    // Миграция: если пароль был в открытом виде — перехешируем
+    if (!isBcryptHash(stored)) {
+      try {
+        const newHash = await hashPassword(pass);
+        setAdminCredentials((prev) => ({ ...prev, passwordHash: newHash, lastChangedAt: Date.now() }));
+        console.log('[Auth] Пароль администратора успешно мигрирован в bcrypt');
+      } catch (err) {
+        console.warn('[Auth] Не удалось мигрировать пароль админа:', err);
+      }
+    }
+
+    setCurrentUser({
+      id: 'admin-seljax',
+      name: `Администратор (${adminCredentials.login})`,
+      group: groups[0]?.id || 'group7_mkpp',
+      isAdmin: true,
+    });
+
+    return { success: true };
   };
 
   const addStudent = (studentData: Omit<StudentAccount, 'id' | 'createdAt'>): StudentAccount => {
@@ -417,7 +477,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  const loginStudentWithPassword = (loginOrName: string, pass: string) => {
+  // Асинхронный вход курсанта с bcrypt-проверкой
+  const loginStudentWithPassword = async (
+    loginOrName: string,
+    pass: string
+  ): Promise<{ success: boolean; error?: string }> => {
     const q = loginOrName.trim().toLowerCase();
     const cleanPass = pass.trim();
     if (!q) return { success: false, error: 'Введите имя или логин' };
@@ -435,7 +499,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     if (!matched) return { success: false, error: 'Курсант не найден' };
     if (matched.status === 'blocked') return { success: false, error: 'Учётная запись заблокирована' };
-    if (matched.password !== cleanPass) return { success: false, error: 'Неверный пароль' };
+
+    const stored = matched.password || '';
+    const ok = await verifyPassword(cleanPass, stored);
+    if (!ok) return { success: false, error: 'Неверный пароль' };
+
+    // Миграция пароля в bcrypt
+    if (!isBcryptHash(stored)) {
+      try {
+        const newHash = await hashPassword(cleanPass);
+        updateStudent(matched.id, { password: newHash });
+        console.log(`[Auth] Пароль курсанта ${matched.fullName} мигрирован в bcrypt`);
+      } catch (err) {
+        console.warn('[Auth] Не удалось мигрировать пароль курсанта:', err);
+      }
+    }
 
     updateStudent(matched.id, { lastLoginAt: Date.now() });
 
@@ -472,14 +550,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return { success: true };
   };
 
-  const changeStudentPassword = (oldPass: string, newPass: string) => {
+  // Асинхронная смена пароля курсанта
+  const changeStudentPassword = async (
+    oldPass: string,
+    newPass: string
+  ): Promise<{ success: boolean; error?: string }> => {
     if (!currentUser || currentUser.isAdmin) return { success: false, error: 'Только для курсанта' };
     const student = students.find((s) => s.id === currentUser.studentId || s.id === currentUser.id);
     if (!student) return { success: false, error: 'Учётная запись не найдена' };
-    if (student.password !== oldPass.trim()) return { success: false, error: 'Неверный текущий пароль' };
-    if (!newPass || newPass.trim().length < 4) return { success: false, error: 'Пароль минимум 4 символа' };
 
-    updateStudent(student.id, { password: newPass.trim() });
+    const stored = student.password || '';
+    const ok = await verifyPassword(oldPass.trim(), stored);
+    if (!ok) return { success: false, error: 'Неверный текущий пароль' };
+
+    if (!newPass || newPass.trim().length < 4) {
+      return { success: false, error: 'Пароль минимум 4 символа' };
+    }
+
+    const newHash = await hashPassword(newPass.trim());
+    updateStudent(student.id, { password: newHash });
 
     addActivityLog({
       userId: student.id,
@@ -488,7 +577,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       userRole: 'student',
       actionType: 'password_change',
       message: `${student.fullName} изменил пароль`,
-      details: 'Смена пароля через личный профиль',
+      details: 'Смена пароля через личный профиль (bcrypt)',
     });
 
     return { success: true };
@@ -533,13 +622,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return used < allowed;
   };
 
-  const updateAdminCredentials = (oldPass: string, newLogin: string, newPass: string) => {
-    if (oldPass !== adminCredentials.passwordHash) return { success: false, error: 'Неверный текущий пароль' };
+  // Асинхронное обновление пароля админа
+  const updateAdminCredentials = async (
+    oldPass: string,
+    newLogin: string,
+    newPass: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    const stored = adminCredentials.passwordHash || '';
+    const ok = await verifyPassword(oldPass, stored);
+    if (!ok) return { success: false, error: 'Неверный текущий пароль' };
+
     const cleanLogin = newLogin.trim();
     if (!cleanLogin) return { success: false, error: 'Логин не может быть пустым' };
     if (newPass.length < 4) return { success: false, error: 'Пароль минимум 4 символа' };
 
-    setAdminCredentials({ ...adminCredentials, login: cleanLogin, passwordHash: newPass, lastChangedAt: Date.now() });
+    const newHash = await hashPassword(newPass);
+
+    setAdminCredentials({
+      ...adminCredentials,
+      login: cleanLogin,
+      passwordHash: newHash,
+      lastChangedAt: Date.now(),
+    });
+
     if (currentUser?.isAdmin) {
       setCurrentUser((prev) => (prev ? { ...prev, name: `Администратор (${cleanLogin})` } : null));
     }
@@ -565,38 +670,106 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }));
   };
 
-  const requestPasswordResetCode = (email: string) => {
-    const clean = email.trim().toLowerCase();
-    const isKnown = adminCredentials.recoveryEmails.some((e) => e.toLowerCase() === clean);
-    if (!isKnown) return { success: false, error: 'Email не найден' };
+  // ==================== ВОССТАНОВЛЕНИЕ ПАРОЛЯ ====================
 
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    setPasswordResetSession({ code, email: clean, expiresAt: Date.now() + 15 * 60 * 1000 });
+  // Запрос кода на email (отправляется через SMTP на сервере)
+  const requestPasswordResetCode = async (
+    email: string
+  ): Promise<{ success: boolean; maskedEmail?: string; error?: string }> => {
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      return { success: false, error: 'Некорректный email' };
+    }
 
-    const [userPart, domainPart] = clean.split('@');
-    const maskedUser = userPart.length > 2 ? `${userPart[0]}***${userPart[userPart.length - 1]}` : `${userPart[0]}***`;
-    return { success: true, code, maskedEmail: `${maskedUser}@${domainPart}` };
+    try {
+      const res = await fetch(`${AUTH_URL}/request-reset`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail }),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        return { success: false, error: json.error || 'Не удалось отправить код' };
+      }
+      return { success: true, maskedEmail: json.maskedEmail };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Ошибка сети' };
+    }
   };
 
-  const resetAdminPasswordWithCode = (code: string, newLogin: string, newPass: string) => {
-    if (!passwordResetSession) return { success: false, error: 'Сессия не найдена' };
-    if (Date.now() > passwordResetSession.expiresAt) {
-      setPasswordResetSession(null);
-      return { success: false, error: 'Код истёк' };
+  // Проверка кода
+  const verifyResetCode = async (
+    email: string,
+    code: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const res = await fetch(`${AUTH_URL}/verify-reset`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), code: code.trim() }),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        return { success: false, error: json.error || 'Неверный код' };
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Ошибка сети' };
     }
-    if (code.trim() !== passwordResetSession.code) return { success: false, error: 'Неверный код' };
+  };
+
+  // Сброс пароля по коду
+  const resetAdminPasswordWithCode = async (
+    email: string,
+    code: string,
+    newLogin: string,
+    newPass: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    // Сначала проверяем код
+    const verify = await verifyResetCode(email, code);
+    if (!verify.success) {
+      return verify;
+    }
 
     const cleanLogin = newLogin.trim();
-    if (!cleanLogin) return { success: false, error: 'Логин пуст' };
-    if (newPass.length < 4) return { success: false, error: 'Пароль минимум 4 символа' };
+    if (!cleanLogin) return { success: false, error: 'Логин не может быть пустым' };
+    if (!newPass || newPass.length < 4) return { success: false, error: 'Пароль минимум 4 символа' };
 
+    // Хешируем новый пароль
+    let newHash = '';
+    try {
+      newHash = await hashPassword(newPass);
+    } catch {
+      return { success: false, error: 'Ошибка хеширования пароля' };
+    }
+
+    // Обновляем credentials
     setAdminCredentials((prev) => ({
       ...prev,
       login: cleanLogin,
-      passwordHash: newPass,
+      passwordHash: newHash,
       lastChangedAt: Date.now(),
     }));
-    setPasswordResetSession(null);
+
+    // Гасим код на сервере
+    try {
+      await fetch(`${AUTH_URL}/consume-reset`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim().toLowerCase() }),
+      });
+    } catch {}
+
+    addActivityLog({
+      userId: 'admin-recovery',
+      userName: 'Администратор',
+      userGroup: 'all',
+      userRole: 'admin',
+      actionType: 'password_change',
+      message: `Восстановлен пароль администратора через email (${email})`,
+      details: 'Успешный сброс пароля по коду из письма',
+    });
+
     return { success: true };
   };
 
@@ -840,7 +1013,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             ...prev,
             examAttemptsUsed: nextUsed,
             canTakeExam: false,
-            examPassed: isPassed ? true : prev.examPassed,
+            examPassed: isPassed ? prev.examPassed : prev.examPassed,
           };
         });
       }
@@ -917,8 +1090,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { success: false, error: 'Ошибка разбора JSON' };
     }
   };
-
-  // ========== ЗАЯВКИ НА ДОСТУП ==========
 
   const submitAccessRequest = (reqData: {
     firstName: string;
@@ -1079,6 +1250,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addRecoveryEmail,
         removeRecoveryEmail,
         requestPasswordResetCode,
+        verifyResetCode,
         resetAdminPasswordWithCode,
         activityLogs,
         addActivityLog,

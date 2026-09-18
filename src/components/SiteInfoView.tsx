@@ -23,7 +23,7 @@ export const SiteInfoView: React.FC = () => {
 
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState({
-    version: siteInfo.version || 'v.0.08',
+    version: siteInfo.version || 'v.0.09',
     developer: 'Мельник Сергей (SelJax)',
     schoolName: siteInfo.schoolName || 'Автошкола ДОСААФ',
     description: siteInfo.description || '',
@@ -50,7 +50,7 @@ export const SiteInfoView: React.FC = () => {
           <div className="space-y-2">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-amber-400 text-neutral-900 shadow-xs">
-                Версия {siteInfo.version || 'v.0.08'}
+                Версия {siteInfo.version || 'v.0.09'}
               </span>
               <span className="px-3 py-1 rounded-full text-xs font-semibold bg-white/15 text-blue-100 border border-white/20">
                 Официальный релиз 2026
@@ -113,7 +113,7 @@ export const SiteInfoView: React.FC = () => {
                     required
                     value={formData.version}
                     onChange={(e) => setFormData({ ...formData, version: e.target.value })}
-                    placeholder="v.0.08"
+                    placeholder="v.0.09"
                     className="w-full px-3 py-2 border rounded-xl"
                   />
                 </div>
@@ -266,7 +266,7 @@ export const SiteInfoView: React.FC = () => {
                   Версия сборки
                 </span>
                 <span className="text-xs font-mono font-bold text-blue-700">
-                  {siteInfo.version} (Выпуск от 16.09.2026)
+                  {siteInfo.version} (Выпуск от 19.09.2026)
                 </span>
               </div>
 

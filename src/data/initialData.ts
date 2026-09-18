@@ -19,8 +19,8 @@ import {
 } from '../types';
 
 export const INITIAL_ADMIN_CREDENTIALS: AdminCredentials = {
-  login: 'seljax',
-  passwordHash: 'fgy36lol90k',
+  login: 'admin',
+  passwordHash: '12345678',
   recoveryEmails: ['zapas_mail_steam@mail.ru'],
   lastChangedAt: 1726080000000,
 };
@@ -1225,8 +1225,8 @@ export const INITIAL_NAV_TABS: NavTabConfig[] = [
 ];
 
 export const INITIAL_SITE_INFO: SiteInfoSettings = {
-  version: 'v.0.08',
-  releaseDate: '16.09.2026',
+  version: 'v.0.09',
+  releaseDate: '19.09.2026',
   developer: 'Мельник Сергей (SelJax)',
   schoolName: 'Автошкола ДОСААФ',
   description:
