@@ -11,6 +11,7 @@ import { CompletedLessonsView } from './components/CompletedLessonsView';
 import { ScheduleInfoView } from './components/ScheduleInfoView';
 import { StudentProfileView } from './components/StudentProfileView';
 import { ActivityLogsView } from './components/ActivityLogsView';
+import { LiveMonitoringView } from './components/LiveMonitoringView';
 import { Footer } from './components/Footer';
 import { DesignInspector } from './components/DesignInspector';
 import { AuthModal } from './components/AuthModal';
@@ -138,6 +139,7 @@ function AppContent() {
               />
             )}
             {activeTab === 'logs' && <ActivityLogsView />}
+            {activeTab === 'monitoring' && <LiveMonitoringView />}
           </>
         )}
       </main>

@@ -291,7 +291,7 @@ export const AuthGateScreen: React.FC<AuthGateScreenProps> = ({ onLoginSuccess }
           </div>
 
           <div className="font-jetbrains text-[9px] uppercase tracking-widest text-[rgba(242,239,235,0.35)] flex justify-between mt-10 pt-6 border-t border-[rgba(242,239,235,0.06)]">
-            <span>Версия v.0.09</span>
+            <span>Версия v.0.10</span>
             <span>Сборка 2026</span>
           </div>
         </aside>
@@ -330,7 +330,7 @@ export const AuthGateScreen: React.FC<AuthGateScreenProps> = ({ onLoginSuccess }
                       : 'text-[rgba(242,239,235,0.4)] hover:text-[#f2efeb]'
                   }`}
                 >
-                  Администратор
+                  Админ
                 </button>
               </nav>
             )}
@@ -343,7 +343,7 @@ export const AuthGateScreen: React.FC<AuthGateScreenProps> = ({ onLoginSuccess }
                     Авторизация курсанта
                   </h2>
                   <p className="text-xs text-[rgba(242,239,235,0.5)] mt-1">
-                    Пожалуйста, войдите в свой личный профиль курсанта ДОСААФ.
+                    Пожалуйста, войдите в свой личный профиль ДОСААФ.
                   </p>
                 </div>
 
@@ -358,7 +358,7 @@ export const AuthGateScreen: React.FC<AuthGateScreenProps> = ({ onLoginSuccess }
                   <div className="space-y-2">
                     <label className="flex justify-between font-jetbrains text-[9px] uppercase tracking-wider text-[rgba(242,239,235,0.6)]">
                       <span>Логин или фамилия</span>
-                      <span>Обязательно</span>
+                      <span></span>
                     </label>
                     <input
                       type="text"
@@ -374,7 +374,7 @@ export const AuthGateScreen: React.FC<AuthGateScreenProps> = ({ onLoginSuccess }
                   <div className="space-y-2">
                     <label className="flex justify-between font-jetbrains text-[9px] uppercase tracking-wider text-[rgba(242,239,235,0.6)]">
                       <span>Пароль</span>
-                      <span>Защищено</span>
+                      <span></span>
                     </label>
                     <div className="relative">
                       <input
@@ -382,7 +382,7 @@ export const AuthGateScreen: React.FC<AuthGateScreenProps> = ({ onLoginSuccess }
                         required
                         value={studentPassword}
                         onChange={(e) => setStudentPassword(e.target.value)}
-                        placeholder="••••••••"
+                        placeholder="••••••••••••"
                         disabled={studentLoading}
                         className="w-full bg-transparent border-b-2 border-[rgba(242,239,235,0.15)] focus:border-[#f59e0b] py-2 pr-10 text-white font-sans text-base outline-none transition-colors placeholder:text-[rgba(242,239,235,0.25)] disabled:opacity-50"
                       />
@@ -451,8 +451,8 @@ export const AuthGateScreen: React.FC<AuthGateScreenProps> = ({ onLoginSuccess }
                 <form onSubmit={handleAdminSubmit} className="space-y-6">
                   <div className="space-y-2">
                     <label className="flex justify-between font-jetbrains text-[9px] uppercase tracking-wider text-[rgba(242,239,235,0.6)]">
-                      <span>Логин администратора</span>
-                      <span>Обязательно</span>
+                      <span>Логин</span>
+                      <span></span>
                     </label>
                     <input
                       type="text"
@@ -467,8 +467,8 @@ export const AuthGateScreen: React.FC<AuthGateScreenProps> = ({ onLoginSuccess }
 
                   <div className="space-y-2">
                     <label className="flex justify-between font-jetbrains text-[9px] uppercase tracking-wider text-[rgba(242,239,235,0.6)]">
-                      <span>Пароль администратора</span>
-                      <span>Защищено</span>
+                      <span>Пароль</span>
+                      <span></span>
                     </label>
                     <div className="relative">
                       <input
@@ -502,7 +502,7 @@ export const AuthGateScreen: React.FC<AuthGateScreenProps> = ({ onLoginSuccess }
                       </>
                     ) : (
                       <>
-                        <span>Войти как Администратор</span>
+                        <span>Войти в систему</span>
                         <ArrowRight className="w-5 h-5 stroke-[2.5]" />
                       </>
                     )}
@@ -510,13 +510,12 @@ export const AuthGateScreen: React.FC<AuthGateScreenProps> = ({ onLoginSuccess }
                 </form>
 
                 {/* Ссылка восстановления пароля */}
-                <div className="pt-4 border-t border-[rgba(242,239,235,0.08)] text-center">
+                <div className="text-center">
                   <button
                     type="button"
                     onClick={goToResetView}
                     className="inline-flex items-center gap-1.5 font-jetbrains text-xs text-[#f59e0b] hover:underline cursor-pointer tracking-wider"
                   >
-                    <KeyRound className="w-3.5 h-3.5" />
                     <span>Забыли пароль администратора?</span>
                   </button>
                 </div>
@@ -727,7 +726,7 @@ export const AuthGateScreen: React.FC<AuthGateScreenProps> = ({ onLoginSuccess }
                       required
                       value={resetStep.newPass}
                       onChange={(e) => setResetStep({ ...resetStep, newPass: e.target.value })}
-                      placeholder="••••••••"
+                      placeholder="••••••••••••"
                       disabled={resetLoading || resetSuccess}
                       className="w-full bg-transparent border-b-2 border-[rgba(242,239,235,0.15)] focus:border-emerald-500 py-2 text-white font-mono text-base outline-none transition-colors disabled:opacity-50"
                     />
@@ -743,7 +742,7 @@ export const AuthGateScreen: React.FC<AuthGateScreenProps> = ({ onLoginSuccess }
                       required
                       value={resetStep.confirmPass}
                       onChange={(e) => setResetStep({ ...resetStep, confirmPass: e.target.value })}
-                      placeholder="••••••••"
+                      placeholder="••••••••••••"
                       disabled={resetLoading || resetSuccess}
                       className="w-full bg-transparent border-b-2 border-[rgba(242,239,235,0.15)] focus:border-emerald-500 py-2 text-white font-mono text-base outline-none transition-colors disabled:opacity-50"
                     />
@@ -929,7 +928,7 @@ export const AuthGateScreen: React.FC<AuthGateScreenProps> = ({ onLoginSuccess }
 
           <div className="font-jetbrains text-[9px] uppercase tracking-widest text-[rgba(242,239,235,0.3)] flex justify-between mt-8 pt-4 border-t border-[rgba(242,239,235,0.06)]">
             <span>Создатель: Мельник Сергей</span>
-            <span>Версия v.0.09</span>
+            <span>Версия v.0.10</span>
           </div>
         </section>
       </div>

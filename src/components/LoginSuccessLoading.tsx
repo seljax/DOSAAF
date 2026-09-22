@@ -83,9 +83,9 @@ export const LoginSuccessLoading: React.FC<LoginSuccessLoadingProps> = ({
           <div className="flex items-center justify-between font-jetbrains text-[11px] text-[rgba(242,239,235,0.6)]">
             <span className="flex items-center gap-1.5">
               <Loader2 className="w-3.5 h-3.5 animate-spin text-[#f59e0b]" />
-              {phase === 'auth' && 'Проверка учётных данных...'}
-              {phase === 'sync' && 'Синхронизация профиля...'}
-              {phase === 'ready' && 'Вход выполнен!'}
+              {phase === 'auth' && 'Регулировка сидения и зеркал...'}
+              {phase === 'sync' && 'Пристёгиваем ремень безопасности...'}
+              {phase === 'ready' && 'Поехали!'}
             </span>
             <span className="text-[#f59e0b] font-bold">{progress}%</span>
           </div>
@@ -94,7 +94,7 @@ export const LoginSuccessLoading: React.FC<LoginSuccessLoadingProps> = ({
         {/* Bottom telemetry */}
         <div className="w-full pt-4 border-t border-[rgba(242,239,235,0.08)] flex justify-between font-jetbrains text-[9px] text-[rgba(242,239,235,0.35)] tracking-widest uppercase">
           <span>Узел: ДОСААФ</span>
-          <span>Версия v.0.09</span>
+          <span>Версия v.0.10</span>
         </div>
       </div>
     </div>

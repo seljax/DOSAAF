@@ -19,6 +19,7 @@ import {
   Palette,
   MousePointer,
   Users,
+  Activity,
 } from 'lucide-react';
 import { AuthModal } from './AuthModal';
 import { StudentManagementModal } from './StudentManagementModal';
@@ -138,6 +139,18 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
               >
                 <FileText className="w-3.5 h-3.5 text-amber-300" />
                 <span>ЛОГИ</span>
+              </button>
+              <button
+                onClick={() => setActiveTab('monitoring')}
+                className={`px-3 py-1 rounded text-[11px] font-bold flex items-center gap-1.5 transition-all shadow-xs ${
+                  activeTab === 'monitoring'
+                    ? 'bg-neutral-950 text-emerald-300 ring-2 ring-emerald-300'
+                    : 'bg-emerald-700 hover:bg-emerald-800 text-white'
+                }`}
+                title="Мониторинг активности курсантов в реальном времени: тесты, экзамены, ответы, ошибки"
+              >
+                <Activity className="w-3.5 h-3.5 text-emerald-300" />
+                <span>МОНИТОРИНГ</span>
               </button>
               <button
                 onClick={() => setIsNavTabsModalOpen(true)}

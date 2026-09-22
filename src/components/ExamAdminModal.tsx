@@ -33,6 +33,7 @@ import {
   FolderPlus,
   FileQuestion,
   Users,
+  Shuffle,
 } from 'lucide-react';
 
 interface ExamAdminModalProps {
@@ -101,32 +102,22 @@ export const ExamAdminModal: React.FC<ExamAdminModalProps> = ({
   // Filtered list for Questions Bank tab
   const filteredBankQuestions = useMemo(() => {
     return questions.filter((q) => {
-      // Pool
       if (qPoolFilter === 'included' && q.includeInExam === false) return false;
       if (qPoolFilter === 'excluded' && q.includeInExam !== false) return false;
-
-      // Category
       if (qCatFilter !== 'all' && q.categoryId !== qCatFilter) return false;
-
-      // Ticket
       if (qTicketFilter !== 'all') {
         const tNum = parseInt(qTicketFilter, 10);
         if ((q.ticketNumber || 1) !== tNum) return false;
       }
-
-      // Target B/C
       const isC = q.categoryType === 'C' || q.groupTarget === 'group3_c';
       if (qTargetFilter === 'B' && isC) return false;
       if (qTargetFilter === 'C' && !isC) return false;
-
-      // Search
       if (qSearch.trim()) {
         const needle = qSearch.toLowerCase();
         const matchesText = q.questionText.toLowerCase().includes(needle);
         const matchesOptions = q.options.some((opt) => opt.toLowerCase().includes(needle));
         if (!matchesText && !matchesOptions) return false;
       }
-
       return true;
     });
   }, [questions, qPoolFilter, qCatFilter, qTicketFilter, qTargetFilter, qSearch]);
@@ -146,14 +137,12 @@ export const ExamAdminModal: React.FC<ExamAdminModalProps> = ({
 
   if (!isOpen) return null;
 
-  // Handle saving exam parameters
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
     updateExamSettings(localSettings);
     alert('Параметры и регламент государственного экзамена успешно сохранены!');
   };
 
-  // Quick action: Add 20 random available questions into selected ticket
   const handleAddRandomToTicket = () => {
     const unassigned = questions.filter((q) => (q.ticketNumber || 1) !== selectedTicket);
     const need = Math.max(1, (examSettings.questionCount || 20) - questionsInCurrentTicket.length);
@@ -165,7 +154,6 @@ export const ExamAdminModal: React.FC<ExamAdminModalProps> = ({
     batchAssignQuestionsToTicket(picked.map((q) => q.id), selectedTicket);
   };
 
-  // Quick action: Clear current ticket
   const handleClearCurrentTicket = () => {
     if (confirm(`Вы действительно хотите удалить все вопросы из Билета №${selectedTicket}? Вопросы останутся в базе, но не будут привязаны к этому билету.`)) {
       const qIds = questionsInCurrentTicket.map((q) => q.id);
@@ -173,7 +161,6 @@ export const ExamAdminModal: React.FC<ExamAdminModalProps> = ({
     }
   };
 
-  // Quick action: Add selected questions from picker
   const handleAddSelectedFromPicker = () => {
     if (selectedPickerQIds.length === 0) return;
     batchAssignQuestionsToTicket(selectedPickerQIds, selectedTicket);
@@ -193,14 +180,14 @@ export const ExamAdminModal: React.FC<ExamAdminModalProps> = ({
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-lg sm:text-xl font-black text-neutral-900 leading-tight">
-                  Управление государственным экзаменом ДОСААФ
+                  Управление экзаменом
                 </h3>
                 <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 font-bold text-[10px] border border-amber-300 uppercase tracking-wider">
-                  Единый центр управления
+                  Будте внимательны!
                 </span>
               </div>
               <p className="text-xs text-neutral-500 mt-0.5">
-                Редактирование каждого билета (1–40), банк экзаменационных вопросов и регламент тестирования в одном окне.
+                Редактирование каждого билета, банк экзаменационных вопросов и регламент тестирования.
               </p>
             </div>
           </div>
@@ -265,7 +252,6 @@ export const ExamAdminModal: React.FC<ExamAdminModalProps> = ({
         {/* TAB 1: TICKET EDITOR */}
         {activeTab === 'tickets' && (
           <div className="flex-1 flex flex-col space-y-3 min-h-0 overflow-hidden">
-            {/* Ticket Selector Bar */}
             <div className="bg-neutral-50 rounded-2xl border border-neutral-200 p-3 shrink-0 space-y-2">
               <div className="flex items-center justify-between gap-3 text-xs flex-wrap">
                 <span className="font-bold text-neutral-800 flex items-center gap-1.5">
@@ -306,7 +292,6 @@ export const ExamAdminModal: React.FC<ExamAdminModalProps> = ({
                 </div>
               </div>
 
-              {/* Horizontal scrollable tickets row */}
               <div className="flex items-center gap-1.5 overflow-x-auto pb-1.5 pt-0.5 scrollbar-thin">
                 {ticketList.map((tNum) => {
                   const qCount = questions.filter(
@@ -344,7 +329,6 @@ export const ExamAdminModal: React.FC<ExamAdminModalProps> = ({
               </div>
             </div>
 
-            {/* Selected Ticket Overview & Management Toolbar */}
             <div className="p-3.5 bg-amber-500/10 rounded-2xl border border-amber-400/30 flex items-center justify-between gap-4 flex-wrap shrink-0">
               <div className="space-y-0.5">
                 <div className="flex items-center gap-2">
@@ -371,7 +355,6 @@ export const ExamAdminModal: React.FC<ExamAdminModalProps> = ({
                 </p>
               </div>
 
-              {/* Action Buttons for Ticket */}
               <div className="flex items-center gap-2 flex-wrap text-xs">
                 <button
                   type="button"
@@ -430,7 +413,6 @@ export const ExamAdminModal: React.FC<ExamAdminModalProps> = ({
               </div>
             </div>
 
-            {/* Questions List in current ticket */}
             <div className="flex-1 overflow-y-auto pr-1 space-y-2.5 min-h-0">
               {questionsInCurrentTicket.length === 0 ? (
                 <div className="p-10 text-center bg-neutral-50 rounded-3xl border border-dashed border-neutral-300 space-y-3">
@@ -474,7 +456,6 @@ export const ExamAdminModal: React.FC<ExamAdminModalProps> = ({
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="space-y-1.5 flex-1">
-                          {/* Badges */}
                           <div className="flex items-center gap-1.5 flex-wrap text-[10px] font-bold">
                             <span className="px-2 py-0.5 rounded bg-neutral-900 text-white font-mono">
                               № {idx + 1}
@@ -498,7 +479,6 @@ export const ExamAdminModal: React.FC<ExamAdminModalProps> = ({
                             </span>
                           </div>
 
-                          {/* Image or Sign preview */}
                           {(q.imageUrl || q.signId) && (
                             <div className="flex items-center gap-3 pt-1">
                               {q.imageUrl && (
@@ -519,12 +499,10 @@ export const ExamAdminModal: React.FC<ExamAdminModalProps> = ({
                             </div>
                           )}
 
-                          {/* Question Text */}
                           <p className="text-xs sm:text-sm font-bold text-neutral-900 leading-snug">
                             {q.questionText}
                           </p>
 
-                          {/* Options preview */}
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1 text-[11px]">
                             {q.options.map((opt, oIdx) => {
                               const isCorrect = oIdx === q.correctAnswerIndex;
@@ -553,9 +531,7 @@ export const ExamAdminModal: React.FC<ExamAdminModalProps> = ({
                           </div>
                         </div>
 
-                        {/* Controls right side */}
                         <div className="flex flex-col items-end gap-2 shrink-0">
-                          {/* Reassign to another ticket selector */}
                           <div className="flex items-center gap-1 text-[11px]">
                             <span className="text-neutral-400 font-medium">Билет:</span>
                             <select
@@ -575,7 +551,6 @@ export const ExamAdminModal: React.FC<ExamAdminModalProps> = ({
                             </select>
                           </div>
 
-                          {/* Edit Question */}
                           <button
                             type="button"
                             onClick={() => onEditQuestion(q)}
@@ -585,7 +560,6 @@ export const ExamAdminModal: React.FC<ExamAdminModalProps> = ({
                             <span>Изменить</span>
                           </button>
 
-                          {/* Remove from ticket */}
                           <button
                             type="button"
                             onClick={() => {
@@ -609,10 +583,8 @@ export const ExamAdminModal: React.FC<ExamAdminModalProps> = ({
         {/* TAB 2: QUESTIONS BANK TAB */}
         {activeTab === 'questions' && (
           <div className="flex-1 flex flex-col space-y-3 min-h-0 overflow-hidden">
-            {/* Filters Toolbar */}
             <div className="p-3 bg-neutral-50 rounded-2xl border border-neutral-200 space-y-2.5 shrink-0 text-xs">
               <div className="flex items-center justify-between gap-3 flex-wrap">
-                {/* Search */}
                 <div className="relative flex-1 min-w-[200px]">
                   <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-neutral-400" />
                   <input
@@ -624,7 +596,6 @@ export const ExamAdminModal: React.FC<ExamAdminModalProps> = ({
                   />
                 </div>
 
-                {/* Category filter */}
                 <div className="flex items-center gap-1.5">
                   <Filter className="w-3.5 h-3.5 text-neutral-400" />
                   <select
@@ -641,7 +612,6 @@ export const ExamAdminModal: React.FC<ExamAdminModalProps> = ({
                   </select>
                 </div>
 
-                {/* Ticket filter */}
                 <div className="flex items-center gap-1.5">
                   <Ticket className="w-3.5 h-3.5 text-neutral-400" />
                   <select
@@ -658,7 +628,6 @@ export const ExamAdminModal: React.FC<ExamAdminModalProps> = ({
                   </select>
                 </div>
 
-                {/* Pool Filter */}
                 <div className="flex items-center p-1 bg-neutral-200/60 rounded-xl">
                   <button
                     type="button"
@@ -696,7 +665,6 @@ export const ExamAdminModal: React.FC<ExamAdminModalProps> = ({
                 </div>
               </div>
 
-              {/* Bulk presets & New Question */}
               <div className="flex items-center justify-between gap-3 pt-1 border-t border-neutral-200 flex-wrap text-xs">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-[11px] text-neutral-500 font-medium">Массовые действия:</span>
@@ -748,7 +716,6 @@ export const ExamAdminModal: React.FC<ExamAdminModalProps> = ({
               </div>
             </div>
 
-            {/* Questions Bank List */}
             <div className="flex-1 overflow-y-auto pr-1 space-y-2.5 min-h-0">
               {filteredBankQuestions.length === 0 ? (
                 <div className="p-8 text-center bg-neutral-50 rounded-2xl border border-neutral-200 text-neutral-500 text-xs">
@@ -809,7 +776,6 @@ export const ExamAdminModal: React.FC<ExamAdminModalProps> = ({
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0">
-                          {/* 1-click toggle included in exam */}
                           <button
                             type="button"
                             onClick={() => updateQuestion(q.id, { includeInExam: !isIncluded })}
@@ -944,6 +910,28 @@ export const ExamAdminModal: React.FC<ExamAdminModalProps> = ({
                   {localSettings.allowQuestionNavigation === true
                     ? 'ВКЛЮЧЕНО: курсант может свободно кликать по номерам вопросов и переключаться между ними.'
                     : 'ВЫКЛЮЧЕНО (регламент): переключаться между вопросами нельзя — вопросы решаются строго по порядку.'}
+                </p>
+              </div>
+
+              {/* Shuffle Options Setting */}
+              <div className="p-4 rounded-2xl border border-neutral-200 bg-neutral-50 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-neutral-900 text-sm flex items-center gap-1.5">
+                    <span>Перемешивать варианты ответов</span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={localSettings.shuffleOptions === true}
+                    onChange={(e) =>
+                      setLocalSettings({ ...localSettings, shuffleOptions: e.target.checked })
+                    }
+                    className="w-5 h-5 accent-blue-600 rounded cursor-pointer"
+                  />
+                </div>
+                <p className="text-[11px] text-neutral-500">
+                  {localSettings.shuffleOptions === true
+                    ? 'ВКЛЮЧЕНО: варианты ответов показываются в случайном порядке — курсант не запомнит расположение правильного ответа.'
+                    : 'ВЫКЛЮЧЕНО: варианты ответов показываются в том порядке, в котором их задал администратор.'}
                 </p>
               </div>
 
@@ -1093,7 +1081,7 @@ export const ExamAdminModal: React.FC<ExamAdminModalProps> = ({
         </div>
       </div>
 
-      {/* QUESTION PICKER MODAL (Add questions to active ticket) */}
+      {/* QUESTION PICKER MODAL */}
       {isAddPickerOpen && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-3 sm:p-6 bg-black/70 backdrop-blur-xs animate-in fade-in">
           <div className="relative w-full max-w-2xl bg-white rounded-3xl shadow-2xl border border-neutral-200 p-5 max-h-[85vh] flex flex-col space-y-3">
@@ -1114,7 +1102,6 @@ export const ExamAdminModal: React.FC<ExamAdminModalProps> = ({
               </button>
             </div>
 
-            {/* Filter in picker */}
             <div className="flex items-center gap-2 shrink-0 text-xs">
               <div className="relative flex-1">
                 <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-neutral-400" />
@@ -1141,7 +1128,6 @@ export const ExamAdminModal: React.FC<ExamAdminModalProps> = ({
               </select>
             </div>
 
-            {/* Questions checkbox list */}
             <div className="flex-1 overflow-y-auto pr-1 space-y-2 min-h-0 text-xs">
               {candidateQuestionsForPicker.length === 0 ? (
                 <div className="p-6 text-center text-neutral-400">Нет доступных вопросов для добавления</div>
@@ -1184,7 +1170,6 @@ export const ExamAdminModal: React.FC<ExamAdminModalProps> = ({
               )}
             </div>
 
-            {/* Picker Footer */}
             <div className="pt-2 border-t border-neutral-200 flex items-center justify-between gap-3 shrink-0 text-xs">
               <span className="text-neutral-500 text-[11px]">
                 Выбрано вопросов: <strong>{selectedPickerQIds.length}</strong>

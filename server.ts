@@ -32,6 +32,44 @@ db.exec(`
   );
 `);
 
+// ==================== MONITORING: АКТИВНЫЕ СЕССИИ ====================
+
+interface LiveSession {
+  userId: string;
+  userName: string;
+  userGroup: string;
+  userGroupName: string;
+  examId: string;
+  examTitle: string;
+  isExamMode: boolean;
+  ticketNumber?: number | 'random';
+  currentIndex: number;
+  totalQuestions: number;
+  answeredCount: number;
+  correctCount: number;
+  wrongCount: number;
+  errors: Array<{ index: number; questionText: string; chosen: string; correct: string }>;
+  answers: Record<number, number>;
+  elapsedSeconds: number;
+  timeLimitSeconds: number;
+  tabViolations: number;
+  startTime: number;
+  lastUpdate: number;
+}
+
+const activeSessions = new Map<string, LiveSession>();
+
+// Очистка «мёртвых» сессий: если не обновлялись > 60 сек — удаляем
+function cleanupDeadSessions() {
+  const now = Date.now();
+  for (const [id, session] of activeSessions) {
+    if (now - session.lastUpdate > 60000) {
+      activeSessions.delete(id);
+    }
+  }
+}
+setInterval(cleanupDeadSessions, 15000);
+
 // ==================== SMTP ====================
 
 const smtpHost = process.env.SMTP_HOST || 'smtp.mail.ru';
@@ -151,7 +189,6 @@ async function startServer() {
 
   // ==================== ХЕШИРОВАНИЕ ПАРОЛЯ ====================
 
-  // POST /api/auth/hash — захешировать пароль (используется при регистрации/смене)
   app.post('/api/auth/hash', async (req, res) => {
     try {
       const { password } = req.body;
@@ -166,7 +203,6 @@ async function startServer() {
     }
   });
 
-  // POST /api/auth/verify — проверить пароль против хеша
   app.post('/api/auth/verify', async (req, res) => {
     try {
       const { password, hash } = req.body;
@@ -183,7 +219,6 @@ async function startServer() {
 
   // ==================== ВОССТАНОВЛЕНИЕ ПАРОЛЯ АДМИНА ====================
 
-  // POST /api/auth/request-reset — запросить код на email
   app.post('/api/auth/request-reset', async (req, res) => {
     try {
       const { email } = req.body;
@@ -208,15 +243,12 @@ async function startServer() {
       `);
       upsert.run(cleanEmail, codeHash, expiresAt, now);
 
-      // Отправляем письмо
       try {
         await sendResetCode(cleanEmail, code);
       } catch (mailErr: any) {
         console.error('Mail send error:', mailErr);
-        // Даже если письмо не ушло — возвращаем успех, чтобы не раскрывать наличие email
       }
 
-      // Маскируем email для отображения
       const [userPart, domainPart] = cleanEmail.split('@');
       const maskedUser =
         userPart.length > 2
@@ -231,7 +263,6 @@ async function startServer() {
     }
   });
 
-  // POST /api/auth/verify-reset — проверить код
   app.post('/api/auth/verify-reset', async (req, res) => {
     try {
       const { email, code } = req.body;
@@ -273,7 +304,6 @@ async function startServer() {
     }
   });
 
-  // POST /api/auth/consume-reset — погасить код после успешного сброса
   app.post('/api/auth/consume-reset', (req, res) => {
     try {
       const { email } = req.body;
@@ -282,6 +312,89 @@ async function startServer() {
       res.json({ success: true });
     } catch (err: any) {
       console.error('Consume reset error:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ==================== МОНИТОРИНГ В РЕАЛЬНОМ ВРЕМЕНИ ====================
+
+  // POST /api/monitoring/update — курсант отправляет состояние (каждые 3 сек)
+  app.post('/api/monitoring/update', (req, res) => {
+    try {
+      const body = req.body;
+      if (!body || !body.userId) {
+        return res.status(400).json({ success: false, error: 'userId обязателен' });
+      }
+
+      const session: LiveSession = {
+        userId: String(body.userId),
+        userName: String(body.userName || 'Курсант'),
+        userGroup: String(body.userGroup || ''),
+        userGroupName: String(body.userGroupName || ''),
+        examId: String(body.examId || ''),
+        examTitle: String(body.examTitle || 'Тест'),
+        isExamMode: Boolean(body.isExamMode),
+        ticketNumber: body.ticketNumber,
+        currentIndex: Number(body.currentIndex || 0),
+        totalQuestions: Number(body.totalQuestions || 0),
+        answeredCount: Number(body.answeredCount || 0),
+        correctCount: Number(body.correctCount || 0),
+        wrongCount: Number(body.wrongCount || 0),
+        errors: Array.isArray(body.errors) ? body.errors : [],
+        answers: body.answers && typeof body.answers === 'object' ? body.answers : {},
+        elapsedSeconds: Number(body.elapsedSeconds || 0),
+        timeLimitSeconds: Number(body.timeLimitSeconds || 0),
+        tabViolations: Number(body.tabViolations || 0),
+        startTime: Number(body.startTime || Date.now()),
+        lastUpdate: Date.now(),
+      };
+
+      activeSessions.set(session.userId, session);
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error('Monitoring update error:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // GET /api/monitoring/active — админ получает список активных сессий
+  app.get('/api/monitoring/active', (req, res) => {
+    try {
+      cleanupDeadSessions();
+      const sessions = Array.from(activeSessions.values()).sort(
+        (a, b) => b.lastUpdate - a.lastUpdate
+      );
+      res.json({ success: true, sessions, count: sessions.length });
+    } catch (err: any) {
+      console.error('Monitoring active error:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // POST /api/monitoring/stop — курсант завершил тест, удаляем сессию
+  app.post('/api/monitoring/stop', (req, res) => {
+    try {
+      const { userId } = req.body;
+      if (!userId) return res.status(400).json({ success: false, error: 'userId обязателен' });
+      activeSessions.delete(String(userId));
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error('Monitoring stop error:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // GET /api/monitoring/session/:userId — детали одной сессии (для клика по курсанту)
+  app.get('/api/monitoring/session/:userId', (req, res) => {
+    try {
+      const { userId } = req.params;
+      const session = activeSessions.get(String(userId));
+      if (!session) {
+        return res.status(404).json({ success: false, error: 'Сессия не найдена' });
+      }
+      res.json({ success: true, session });
+    } catch (err: any) {
+      console.error('Monitoring session error:', err);
       res.status(500).json({ success: false, error: err.message });
     }
   });
@@ -305,6 +418,7 @@ async function startServer() {
   app.listen(PORT, HOST, () => {
     console.log(`[ДОСААФ Server] Running on http://${HOST}:${PORT} with SQLite database`);
     console.log(`[SMTP] ${smtpUser ? 'Настроен: ' + smtpUser : 'НЕ настроен (письма не отправляются)'}`);
+    console.log(`[Monitoring] API активных сессий готов: /api/monitoring/*`);
   });
 }
 

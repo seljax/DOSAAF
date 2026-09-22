@@ -1218,15 +1218,15 @@ export const INITIAL_FOOTER_SETTINGS: FooterSettings = {
 
 export const INITIAL_NAV_TABS: NavTabConfig[] = [
   { id: 'rules', label: 'Правила и знаки', isVisible: true, order: 1 },
-  { id: 'tests', label: 'Тесты и экзамен', isVisible: true, order: 2 },
+  { id: 'tests', label: 'Тесты', isVisible: true, order: 2 },
   { id: 'materials', label: 'Полезные материалы', isVisible: true, order: 3 },
   { id: 'lessons', label: 'Занятия', isVisible: true, order: 4 },
   { id: 'schedule', label: 'Расписание', isVisible: true, order: 5 },
 ];
 
 export const INITIAL_SITE_INFO: SiteInfoSettings = {
-  version: 'v.0.09',
-  releaseDate: '19.09.2026',
+  version: 'v.0.10',
+  releaseDate: '22.09.2026',
   developer: 'Мельник Сергей (SelJax)',
   schoolName: 'Автошкола ДОСААФ',
   description:

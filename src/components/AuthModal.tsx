@@ -485,7 +485,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, defaultTa
                   onClick={goToResetView}
                   className="text-xs text-amber-700 hover:text-amber-800 font-semibold hover:underline cursor-pointer"
                 >
-                  Забыли пароль администратора?
+                  Забыли пароль?
                 </button>
               </div>
             </form>

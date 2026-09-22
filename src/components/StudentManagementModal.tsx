@@ -159,7 +159,7 @@ export const StudentManagementModal: React.FC<StudentManagementModalProps> = ({
       firstName: student.firstName,
       lastName: student.lastName,
       login: student.login,
-      password: student.password,
+      password: student.passwordPlain || '',
       group: student.group,
       status: student.status,
       rulesAccess: student.allowedTabs.rules,
@@ -191,7 +191,6 @@ export const StudentManagementModal: React.FC<StudentManagementModalProps> = ({
       return;
     }
 
-    // Default or clean login
     let login = formData.login.trim();
     if (!login) {
       login = `${first.toLowerCase()}_${last.toLowerCase()}`
@@ -204,13 +203,13 @@ export const StudentManagementModal: React.FC<StudentManagementModalProps> = ({
     const attemptsUsed = Math.max(0, Number(formData.examAttemptsUsed) || 0);
 
     if (editingStudentId) {
-      // update
       updateStudent(editingStudentId, {
         firstName: first,
         lastName: last,
         fullName: `${last} ${first}`,
         login,
         password: formData.password.trim(),
+        passwordPlain: formData.password.trim(),
         group: formData.group,
         status: formData.status,
         allowedTabs: {
@@ -227,7 +226,6 @@ export const StudentManagementModal: React.FC<StudentManagementModalProps> = ({
         notes: formData.notes.trim(),
       });
     } else {
-      // add
       addStudent({
         firstName: first,
         lastName: last,
@@ -283,7 +281,6 @@ export const StudentManagementModal: React.FC<StudentManagementModalProps> = ({
     }
   };
 
-  // Filtered students
   const filteredStudents = students.filter((s) => {
     const matchSearch =
       s.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -474,10 +471,24 @@ export const StudentManagementModal: React.FC<StudentManagementModalProps> = ({
                                 <div className="flex items-center gap-1.5">
                                   <span>Пароль:</span>
                                   <span className="font-bold text-neutral-800 bg-neutral-100 px-1.5 py-0.5 rounded text-[11px]">
-                                    {isPassVisible ? student.password : '••••••••'}
+                                    {isPassVisible
+                                      ? (student.passwordPlain || '⚠️ недоступен')
+                                      : '••••••••'}
                                   </span>
                                   <button
-                                    onClick={() => togglePasswordVisibility(student.id)}
+                                    onClick={() => {
+                                      if (!student.passwordPlain) {
+                                        alert(
+                                          'Для этого курсанта открытый пароль недоступен (создан до обновления).\n\n' +
+                                          'Чтобы задать новый пароль:\n' +
+                                          '1. Нажмите «Редактировать».\n' +
+                                          '2. Введите новый пароль.\n' +
+                                          '3. Сохраните — пароль появится здесь.'
+                                        );
+                                        return;
+                                      }
+                                      togglePasswordVisibility(student.id);
+                                    }}
                                     className="p-1 text-neutral-400 hover:text-neutral-700 rounded"
                                     title={isPassVisible ? 'Скрыть пароль' : 'Показать пароль'}
                                   >
@@ -794,7 +805,9 @@ export const StudentManagementModal: React.FC<StudentManagementModalProps> = ({
                   </button>
                 </div>
                 <p className="text-[11px] text-neutral-500 mt-1">
-                  Сообщите этот пароль курсанту для входа в личный кабинет автошколы.
+                  {editingStudentId && !formData.password
+                    ? 'Открытый пароль недоступен (курсант создан до обновления). Введите новый пароль, чтобы задать его.'
+                    : 'Сообщите этот пароль курсанту для входа в личный кабинет автошколы.'}
                 </p>
               </div>
 
@@ -1045,7 +1058,6 @@ export const StudentManagementModal: React.FC<StudentManagementModalProps> = ({
           {/* Security Tab */}
           {activeTab === 'security' && (
             <div className="space-y-6">
-              {/* Change Login and Password */}
               <div className="bg-neutral-50 p-5 sm:p-6 rounded-2xl border border-neutral-200 space-y-4">
                 <div className="flex items-center gap-2.5">
                   <div className="w-8 h-8 rounded-xl bg-amber-500 text-neutral-950 flex items-center justify-center font-bold">
@@ -1152,7 +1164,7 @@ export const StudentManagementModal: React.FC<StudentManagementModalProps> = ({
             </div>
           )}
 
-          {/* Requests Tab (Задача 3: Заявки у администратора) */}
+          {/* Requests Tab */}
           {activeTab === 'requests' && (
             <div className="space-y-4 animate-in fade-in duration-150">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-neutral-50 p-4 rounded-2xl border border-neutral-200">
@@ -1219,7 +1231,6 @@ export const StudentManagementModal: React.FC<StudentManagementModalProps> = ({
                 </div>
               </div>
 
-              {/* Feedback */}
               {modalReqFeedback && (
                 <div
                   className={`p-3 rounded-xl text-xs flex items-center justify-between gap-2 ${
@@ -1246,7 +1257,6 @@ export const StudentManagementModal: React.FC<StudentManagementModalProps> = ({
                 </div>
               )}
 
-              {/* List */}
               {filteredRequests.length === 0 ? (
                 <div className="py-12 text-center text-neutral-400 text-xs bg-neutral-50 rounded-2xl border border-dashed border-neutral-200">
                   <UserPlus className="w-8 h-8 mx-auto text-neutral-300 mb-2" />

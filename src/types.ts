@@ -19,7 +19,8 @@ export interface StudentAccount {
   lastName: string;
   fullName: string;
   login: string;
-  password: string;
+  password: string;            // bcrypt-хеш (для проверки при входе)
+  passwordPlain?: string;      // открытый пароль (для показа админу)
   group: string;
   status: 'active' | 'blocked';
   allowedTabs: {
@@ -27,13 +28,14 @@ export interface StudentAccount {
     materials: boolean;
     lessons: boolean;
     schedule: boolean;
+    externalExam?: boolean;   // ← доступ к внешнему тесту ГИБДД
   };
   canTakeTests: boolean;
   canTakeExam: boolean;
-  examAttemptsAllowed?: number; // total attempts allowed by admin (default: 1)
-  examAttemptsUsed?: number; // attempts already taken (default: 0)
-  examPassed?: boolean; // whether student has successfully passed the exam
-  assignedExamTicket?: number | 'free_choice'; // assigned specific ticket (1..40) or student free choice
+  examAttemptsAllowed?: number;
+  examAttemptsUsed?: number;
+  examPassed?: boolean;
+  assignedExamTicket?: number | 'free_choice';
   notes?: string;
   createdAt: number;
   lastLoginAt?: number;
@@ -44,6 +46,7 @@ export interface AccessRequest {
   firstName: string;
   lastName: string;
   password: string;
+  passwordPlain?: string;      // открытый пароль
   group?: string;
   status: 'pending' | 'approved' | 'rejected';
   createdAt: number;
@@ -72,6 +75,7 @@ export interface User {
     materials?: boolean;
     lessons?: boolean;
     schedule?: boolean;
+    externalExam?: boolean;
   };
   canTakeTests?: boolean;
   canTakeExam?: boolean;
@@ -157,6 +161,7 @@ export interface TestAttempt {
   ticketNumber?: number | 'random';
   abandoned?: boolean; // true if student started and closed/exited without completing
   answeredCount?: number;
+  questionOrder?: string[];
 }
 
 export interface LessonAttachment {
@@ -230,6 +235,7 @@ export interface ExamSettings {
   showImmediateFeedback?: boolean; // If false (default), right/wrong answers and explanations shown only at end of exam
   allowQuestionNavigation?: boolean; // If false (default), switching between questions during exam is forbidden
   uniqueTicketPerStudent?: boolean; // If true (default), when a student picks a ticket, other students cannot pick it
+  shuffleOptions?: boolean; // перемешивать варианты ответа
   occupiedTickets?: OccupiedTicket[]; // List of currently active/occupied tickets
 }
 

@@ -362,11 +362,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // Миграция: если пароль был в открытом виде — перехешируем
     if (!isBcryptHash(stored)) {
       try {
-        const newHash = await hashPassword(pass);
-        setAdminCredentials((prev) => ({ ...prev, passwordHash: newHash, lastChangedAt: Date.now() }));
-        console.log('[Auth] Пароль администратора успешно мигрирован в bcrypt');
+        const newHash = await hashPassword(cleanPass);
+        // Обновляем ТОЛЬКО password (хеш), passwordPlain сохраняем как есть
+        setStudents((prev) =>
+          prev.map((s) => (s.id === matched.id ? { ...s, password: newHash } : s))
+        );
+        console.log(`[Auth] Пароль курсанта ${matched.fullName} мигрирован в bcrypt`);
       } catch (err) {
-        console.warn('[Auth] Не удалось мигрировать пароль админа:', err);
+        console.warn('[Auth] Не удалось мигрировать пароль курсанта:', err);
       }
     }
 
@@ -381,32 +384,50 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const addStudent = (studentData: Omit<StudentAccount, 'id' | 'createdAt'>): StudentAccount => {
-    const cleanFirst = studentData.firstName.trim();
-    const cleanLast = studentData.lastName.trim();
-    const fullName = `${cleanLast} ${cleanFirst}`.trim() || `${cleanFirst} ${cleanLast}`.trim();
-    const newStudent: StudentAccount = {
-      ...studentData,
-      id: `student_${Date.now()}`,
-      firstName: cleanFirst,
-      lastName: cleanLast,
-      fullName,
-      login: studentData.login.trim() || `kursant_${Date.now().toString().slice(-4)}`,
-      password: studentData.password.trim(),
-      canTakeTests: studentData.canTakeTests ?? true,
-      canTakeExam: studentData.canTakeExam ?? true,
-      examAttemptsAllowed: studentData.examAttemptsAllowed ?? examSettings.defaultAllowedAttempts ?? 1,
-      examAttemptsUsed: studentData.examAttemptsUsed ?? 0,
-      createdAt: Date.now(),
-    };
-    setStudents((prev) => [newStudent, ...prev]);
-    return newStudent;
+  const cleanFirst = studentData.firstName.trim();
+  const cleanLast = studentData.lastName.trim();
+  const fullName = `${cleanLast} ${cleanFirst}`.trim() || `${cleanFirst} ${cleanLast}`.trim();
+  const cleanPassword = studentData.password.trim();
+  const newStudent: StudentAccount = {
+    ...studentData,
+    id: `student_${Date.now()}`,
+    firstName: cleanFirst,
+    lastName: cleanLast,
+    fullName,
+    login: studentData.login.trim() || `kursant_${Date.now().toString().slice(-4)}`,
+    password: cleanPassword,
+    passwordPlain: cleanPassword,
+    allowedTabs: {
+      rules: studentData.allowedTabs?.rules ?? true,
+      materials: studentData.allowedTabs?.materials ?? true,
+      lessons: studentData.allowedTabs?.lessons ?? true,
+      schedule: studentData.allowedTabs?.schedule ?? true,
+      externalExam: studentData.allowedTabs?.externalExam ?? false,
+    },
+    canTakeTests: studentData.canTakeTests ?? true,
+    canTakeExam: studentData.canTakeExam ?? true,
+    examAttemptsAllowed: studentData.examAttemptsAllowed ?? examSettings.defaultAllowedAttempts ?? 1,
+    examAttemptsUsed: studentData.examAttemptsUsed ?? 0,
+    createdAt: Date.now(),
   };
+  setStudents((prev) => [newStudent, ...prev]);
+  return newStudent;
+};
 
   const updateStudent = (id: string, updates: Partial<StudentAccount>) => {
     setStudents((prev) =>
       prev.map((s) => {
         if (s.id !== id) return s;
         const updated = { ...s, ...updates };
+
+        // Автосинхронизация открытого пароля (только если это не bcrypt-хеш)
+        if (updates.password !== undefined && updates.password.trim() !== '') {
+          const isHash = /^\$2[aby]\$\d{2}\$/.test(updates.password);
+          if (!isHash && updates.passwordPlain === undefined) {
+            updated.passwordPlain = updates.password;
+          }
+        }
+
         if (updates.firstName !== undefined || updates.lastName !== undefined) {
           const first = (updates.firstName ?? s.firstName).trim();
           const last = (updates.lastName ?? s.lastName).trim();
@@ -518,22 +539,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     updateStudent(matched.id, { lastLoginAt: Date.now() });
 
     setCurrentUser({
-      id: matched.id,
-      studentId: matched.id,
-      name: matched.fullName,
-      firstName: matched.firstName,
-      lastName: matched.lastName,
-      login: matched.login,
-      group: matched.group,
-      isAdmin: false,
-      allowedTabs: matched.allowedTabs,
-      canTakeTests: matched.canTakeTests,
-      canTakeExam: matched.canTakeExam,
-      examAttemptsAllowed: matched.examAttemptsAllowed ?? 1,
-      examAttemptsUsed: matched.examAttemptsUsed ?? 0,
-      examPassed: matched.examPassed,
-      assignedExamTicket: matched.assignedExamTicket,
-    });
+  id: matched.id,
+  studentId: matched.id,
+  name: matched.fullName,
+  firstName: matched.firstName,
+  lastName: matched.lastName,
+  login: matched.login,
+  group: matched.group,
+  isAdmin: false,
+  allowedTabs: {
+    rules: matched.allowedTabs?.rules ?? true,
+    materials: matched.allowedTabs?.materials ?? true,
+    lessons: matched.allowedTabs?.lessons ?? true,
+    schedule: matched.allowedTabs?.schedule ?? true,
+    externalExam: matched.allowedTabs?.externalExam ?? false,
+  },
+  canTakeTests: matched.canTakeTests,
+  canTakeExam: matched.canTakeExam,
+  examAttemptsAllowed: matched.examAttemptsAllowed ?? 1,
+  examAttemptsUsed: matched.examAttemptsUsed ?? 0,
+  examPassed: matched.examPassed,
+  assignedExamTicket: matched.assignedExamTicket,
+});
 
     setSelectedGroupTab(matched.group);
 
@@ -568,7 +595,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     const newHash = await hashPassword(newPass.trim());
-    updateStudent(student.id, { password: newHash });
+    updateStudent(student.id, {
+      password: newHash,
+      passwordPlain: newPass.trim(),   // ← обновляем открытый пароль
+    });
 
     addActivityLog({
       userId: student.id,
@@ -584,16 +614,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const canAccessTab = (tabId: string): boolean => {
-    if (currentUser?.isAdmin) return true;
-    if (tabId === 'stats' || tabId === 'logs') return false;
-    if (tabId === 'about' || tabId === 'profile') return true;
-    if (tabId === 'tests') return true;
-    if (currentUser?.allowedTabs) {
-      const key = tabId as keyof StudentAccount['allowedTabs'];
-      if (currentUser.allowedTabs[key] !== undefined) return Boolean(currentUser.allowedTabs[key]);
+  if (currentUser?.isAdmin) return true;
+  if (tabId === 'stats' || tabId === 'logs' || tabId === 'monitoring') return false;
+  if (tabId === 'about' || tabId === 'profile') return true;
+  if (tabId === 'tests') return true;
+
+  if (tabId === 'external_exam') {
+    return currentUser?.allowedTabs?.externalExam === true;
+  }
+
+  if (currentUser?.allowedTabs) {
+    const key = tabId as keyof StudentAccount['allowedTabs'];
+    if (currentUser.allowedTabs[key] !== undefined) {
+      return Boolean(currentUser.allowedTabs[key]);
     }
-    return true;
-  };
+  }
+  return true;
+};
 
   const canStudentTakeTests = (): boolean => {
     if (currentUser?.isAdmin) return true;
@@ -1148,23 +1185,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const targetGroup = target.group || groups[0]?.id || 'group7_mkpp';
     const newStudent = addStudent({
-      firstName: target.firstName,
-      lastName: target.lastName,
-      fullName: `${target.lastName} ${target.firstName}`.trim(),
-      login: generatedLogin,
-      password: target.password,
-      group: targetGroup,
-      status: 'active',
-      allowedTabs: {
-        rules: true,
-        materials: true,
-        lessons: true,
-        schedule: true,
-      },
-      canTakeTests: true,
-      canTakeExam: false,
-      notes: `Заявка одобрена администратором ${new Date().toLocaleDateString('ru-RU')}`,
-    });
+  firstName: target.firstName,
+  lastName: target.lastName,
+  fullName: `${target.lastName} ${target.firstName}`.trim(),
+  login: generatedLogin,
+  password: target.password,
+  passwordPlain: target.password,
+  group: targetGroup,
+  status: 'active',
+  allowedTabs: {
+    rules: true,
+    materials: true,
+    lessons: true,
+    schedule: true,
+    externalExam: false,
+  },
+  canTakeTests: true,
+  canTakeExam: false,
+  notes: `Заявка одобрена администратором ${new Date().toLocaleDateString('ru-RU')}`,
+});
 
     setAccessRequests((prev) =>
       prev.map((r) =>

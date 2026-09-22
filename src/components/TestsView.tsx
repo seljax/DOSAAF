@@ -8,6 +8,7 @@ import { useDesignEditor } from '../context/DesignEditorContext';
 import confetti from 'canvas-confetti';
 import { playSuccessSound, playFailSound } from '../utils/sound';
 import { ExamAdminModal } from './ExamAdminModal';
+import { exportExamSheetCSV } from '../utils/exportExamSheet';
 import {
   CheckCircle2,
   XCircle,
@@ -47,6 +48,9 @@ import {
   Ticket,
   SkipForward,
   Users,
+  ExternalLink,
+  Shuffle,
+  Download,
 } from 'lucide-react';
 
 interface ActiveTestSession {
@@ -55,12 +59,14 @@ interface ActiveTestSession {
   ticketNumber?: number | 'random';
   questionsList: Question[];
   currentIndex: number;
-  userAnswers: Record<number, number>; // index -> chosen option index
-  skippedIndices?: number[]; // indices of questions skipped by cadet
+  userAnswers: Record<number, number>;
+  skippedIndices?: number[];
+  selectedTempIndex?: number;
+  optionOrder?: Record<number, number[]>;
   isFinished: boolean;
   startTime: number;
   elapsedSeconds: number;
-  timeLimitSeconds: number; // 0 = unlimited
+  timeLimitSeconds: number;
 }
 
 export const TestsView: React.FC = () => {
@@ -92,44 +98,27 @@ export const TestsView: React.FC = () => {
     isExamInProgress,
     setIsExamInProgress,
     addActivityLog,
+    testAttempts,
   } = useApp();
   const { getOrderedItems } = useDesignEditor();
 
-  // Test Session state
   const [activeSession, setActiveSession] = useState<ActiveTestSession | null>(null);
-
-  // Pre-exam Warning & Instruction Modal state
   const [isExamWarningOpen, setIsExamWarningOpen] = useState(false);
   const [examAgreementChecked, setExamAgreementChecked] = useState(false);
-
-  // Anti-cheat tab tracking & violation alerts
   const [tabViolationsCount, setTabViolationsCount] = useState(0);
   const [showTabViolationAlert, setShowTabViolationAlert] = useState(false);
-
-  // Filter for question bank exam pool: 'all' | 'included' | 'excluded'
   const [examInclusionFilter, setExamInclusionFilter] = useState<'all' | 'included' | 'excluded'>('all');
-
-  // Admin Exam & Timer Settings Modal
   const [isExamSettingsOpen, setIsExamSettingsOpen] = useState(false);
   const [localExamSettings, setLocalExamSettings] = useState(examSettings);
-
-  // Unified Admin Exam & Ticket Manager Modal
   const [isExamAdminModalOpen, setIsExamAdminModalOpen] = useState(false);
   const [examAdminTab, setExamAdminTab] = useState<'tickets' | 'questions' | 'settings'>('tickets');
-
-  // Filter for question bank view
   const [selectedCatFilter, setSelectedCatFilter] = useState<string>('all');
   const [activeBankTab, setActiveBankTab] = useState<'quizzes' | 'manage_questions'>('quizzes');
-
-  // Ticket selection for Exam
   const [selectedExamTicket, setSelectedExamTicket] = useState<number | 'random'>('random');
   const [isTicketSelectModalOpen, setIsTicketSelectModalOpen] = useState(false);
-
-  // Admin Modals
   const [isCatModalOpen, setIsCatModalOpen] = useState(false);
   const [editingCatId, setEditingCatId] = useState<string | null>(null);
   const [catFormData, setCatFormData] = useState({ title: '', description: '', iconName: 'HelpCircle' });
-
   const [isQuestionModalOpen, setIsQuestionModalOpen] = useState(false);
   const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
   const [qFormData, setQFormData] = useState({
@@ -146,8 +135,6 @@ export const TestsView: React.FC = () => {
     includeInExam: true,
     ticketNumber: 1,
   });
-
-  // Admin Exam Questions Builder & Manager Modal
   const [isExamQuestionsModalOpen, setIsExamQuestionsModalOpen] = useState(false);
   const [examQSearch, setExamQSearch] = useState('');
   const [examQCatFilter, setExamQCatFilter] = useState('all');
@@ -155,18 +142,121 @@ export const TestsView: React.FC = () => {
   const [examQStatusFilter, setExamQStatusFilter] = useState<'all' | 'included' | 'excluded'>('all');
   const [examQTicketFilter, setExamQTicketFilter] = useState<number | 'all'>('all');
 
-  // Keep local settings in sync with context
+  const [isExternalExamOpen, setIsExternalExamOpen] = useState(false);
+
   useEffect(() => {
     setLocalExamSettings(examSettings);
   }, [examSettings]);
 
-  // Keep a ref to activeSession for clean unmount/exit tracking
   const activeSessionRef = useRef<ActiveTestSession | null>(null);
   useEffect(() => {
     activeSessionRef.current = activeSession;
   }, [activeSession]);
 
-  // Tab switching violation monitor during active state exam
+  // ===== ФУНКЦИЯ: генерация карты перемешивания =====
+  const generateOptionOrder = (questionsList: Question[], shouldShuffle: boolean): Record<number, number[]> => {
+    const order: Record<number, number[]> = {};
+    questionsList.forEach((q, idx) => {
+      const indices = q.options.map((_, i) => i);
+      if (shouldShuffle) {
+        for (let i = indices.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [indices[i], indices[j]] = [indices[j], indices[i]];
+        }
+      }
+      order[idx] = indices;
+    });
+    return order;
+  };
+
+  // ===== МОНИТОРИНГ =====
+  useEffect(() => {
+    if (!activeSession || activeSession.isFinished) {
+      if (currentUser?.id) {
+        fetch('/api/monitoring/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: currentUser.id }),
+        }).catch(() => {});
+      }
+      return;
+    }
+
+    const sendState = () => {
+      try {
+        let correctCount = 0;
+        let wrongCount = 0;
+        const errors: Array<{
+          index: number;
+          questionText: string;
+          chosen: string;
+          correct: string;
+        }> = [];
+
+        activeSession.questionsList.forEach((q, idx) => {
+          const chosen = activeSession.userAnswers[idx];
+          if (chosen !== undefined) {
+            const order = activeSession.optionOrder?.[idx] || q.options.map((_, i) => i);
+            const originalIdx = order[chosen];
+            if (originalIdx === q.correctAnswerIndex) {
+              correctCount++;
+            } else {
+              wrongCount++;
+              errors.push({
+                index: idx + 1,
+                questionText: q.questionText.slice(0, 100),
+                chosen: q.options[originalIdx] || '—',
+                correct: q.options[q.correctAnswerIndex] || '—',
+              });
+            }
+          }
+        });
+
+        const answersCount = Object.keys(activeSession.userAnswers).length;
+
+        fetch('/api/monitoring/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: currentUser?.id || 'guest',
+            userName: currentUser?.name || 'Курсант',
+            userGroup: currentUser?.group || '',
+            userGroupName: getGroupName(currentUser?.group || ''),
+            examId: activeSession.isExamMode
+              ? `exam_${activeSession.ticketNumber || 'random'}`
+              : activeSession.category?.id || 'test',
+            examTitle: activeSession.isExamMode
+              ? `Экзамен • ${
+                  activeSession.ticketNumber && activeSession.ticketNumber !== 'random'
+                    ? `Билет №${activeSession.ticketNumber}`
+                    : 'Случайный билет'
+                }`
+              : activeSession.category?.title || 'Тематический тест',
+            isExamMode: activeSession.isExamMode,
+            ticketNumber: activeSession.ticketNumber,
+            currentIndex: activeSession.currentIndex,
+            totalQuestions: activeSession.questionsList.length,
+            answeredCount: answersCount,
+            correctCount,
+            wrongCount,
+            errors,
+            answers: activeSession.userAnswers,
+            elapsedSeconds: activeSession.elapsedSeconds,
+            timeLimitSeconds: activeSession.timeLimitSeconds,
+            tabViolations: tabViolationsCount,
+            startTime: activeSession.startTime,
+          }),
+        }).catch(() => {});
+      } catch (err) {
+        console.warn('Monitoring update error:', err);
+      }
+    };
+
+    sendState();
+    const interval = setInterval(sendState, 3000);
+    return () => clearInterval(interval);
+  }, [activeSession, currentUser, tabViolationsCount, getGroupName]);
+
   useEffect(() => {
     if (!activeSession || !activeSession.isExamMode || activeSession.isFinished) return;
 
@@ -190,7 +280,7 @@ export const TestsView: React.FC = () => {
     };
 
     const handleWindowBlur = () => {
-      if (document.hidden) return; // already handled by visibilitychange
+      if (document.hidden) return;
       setTabViolationsCount((prev) => {
         const nextCount = prev + 1;
         addActivityLog({
@@ -215,7 +305,6 @@ export const TestsView: React.FC = () => {
     };
   }, [activeSession?.isExamMode, activeSession?.isFinished, addActivityLog, currentUser, groups]);
 
-  // Finish test callback
   const finishActiveTest = (sessionToFinish = activeSession) => {
     if (!sessionToFinish || sessionToFinish.isFinished) return;
 
@@ -233,7 +322,11 @@ export const TestsView: React.FC = () => {
     const wrongIds: string[] = [];
 
     sessionToFinish.questionsList.forEach((q, idx) => {
-      if (sessionToFinish.userAnswers[idx] === q.correctAnswerIndex) {
+      const order = sessionToFinish.optionOrder?.[idx] || q.options.map((_, i) => i);
+      const chosenDisplayIdx = sessionToFinish.userAnswers[idx];
+      const originalIdx = chosenDisplayIdx !== undefined ? order[chosenDisplayIdx] : -1;
+
+      if (originalIdx === q.correctAnswerIndex) {
         correctCount++;
       } else {
         wrongIds.push(q.id);
@@ -250,7 +343,6 @@ export const TestsView: React.FC = () => {
       isFinished: true,
     });
 
-    // Record to test attempts
     const examTicketLabel = sessionToFinish.ticketNumber && sessionToFinish.ticketNumber !== 'random'
       ? `Билет №${sessionToFinish.ticketNumber}`
       : 'Случайный билет';
@@ -273,6 +365,7 @@ export const TestsView: React.FC = () => {
       wrongQuestionIds: wrongIds,
       isExam: sessionToFinish.isExamMode,
       ticketNumber: sessionToFinish.isExamMode ? sessionToFinish.ticketNumber || 'random' : undefined,
+      questionOrder: sessionToFinish.questionsList.map((q) => q.id),
     });
 
     if (passed) {
@@ -287,7 +380,6 @@ export const TestsView: React.FC = () => {
     }
   };
 
-  // Handle aborting/quitting an unfinished test
   const handleAbortTest = (sessionToAbort = activeSession) => {
     if (!sessionToAbort || sessionToAbort.isFinished) {
       setActiveSession(null);
@@ -299,10 +391,13 @@ export const TestsView: React.FC = () => {
     const wrongIds: string[] = [];
 
     sessionToAbort.questionsList.forEach((q, idx) => {
-      const ans = sessionToAbort.userAnswers[idx];
-      if (ans !== undefined) {
+      const order = sessionToAbort.optionOrder?.[idx] || q.options.map((_, i) => i);
+      const chosenDisplayIdx = sessionToAbort.userAnswers[idx];
+
+      if (chosenDisplayIdx !== undefined) {
         answeredCount++;
-        if (ans === q.correctAnswerIndex) {
+        const originalIdx = order[chosenDisplayIdx];
+        if (originalIdx === q.correctAnswerIndex) {
           correctCount++;
         } else {
           wrongIds.push(q.id);
@@ -348,7 +443,6 @@ export const TestsView: React.FC = () => {
     setActiveSession(null);
   };
 
-  // Register beforeunload & unmount cleanup to record abandoned attempts if user closes tab
   useEffect(() => {
     const handleBeforeUnload = () => {
       if (activeSessionRef.current && !activeSessionRef.current.isFinished) {
@@ -361,7 +455,6 @@ export const TestsView: React.FC = () => {
     };
   }, []);
 
-  // Timer tick for active test session & auto-finish on expiration
   useEffect(() => {
     if (!activeSession || activeSession.isFinished) return;
     const interval = setInterval(() => {
@@ -369,7 +462,6 @@ export const TestsView: React.FC = () => {
         if (!prev || prev.isFinished) return prev;
         const newElapsed = Math.floor((Date.now() - prev.startTime) / 1000);
 
-        // Check if time limit reached
         if (prev.timeLimitSeconds > 0 && newElapsed >= prev.timeLimitSeconds) {
           clearInterval(interval);
           finishActiveTest(prev);
@@ -385,7 +477,6 @@ export const TestsView: React.FC = () => {
     return () => clearInterval(interval);
   }, [activeSession?.isFinished, activeSession?.timeLimitSeconds]);
 
-  // Questions filtered by group preference if selected
   const availableQuestions = useMemo(() => {
     return questions.filter((q) => {
       if (selectedGroupTab !== 'all' && q.groupTarget && q.groupTarget !== 'all' && q.groupTarget !== selectedGroupTab) {
@@ -395,13 +486,11 @@ export const TestsView: React.FC = () => {
     });
   }, [questions, selectedGroupTab]);
 
-  // Available ticket numbers from questions database / settings (1 to totalTickets, max 40)
   const availableTickets = useMemo(() => {
     const total = Math.min(40, Math.max(1, examSettings.totalTickets || 40));
     return Array.from({ length: total }, (_, i) => i + 1);
   }, [examSettings.totalTickets]);
 
-  // Current student account info for assigned ticket check
   const currentStudentAccount = useMemo(() => {
     return students.find(
       (s) => s.id === currentUser?.id || s.login === currentUser?.id || s.name === currentUser?.name
@@ -410,31 +499,25 @@ export const TestsView: React.FC = () => {
 
   const studentAssignedTicket = currentStudentAccount?.assignedExamTicket ?? currentUser?.assignedExamTicket;
 
-  // Filtered list of questions in the Exam Questions Builder modal
   const filteredExamQuestions = useMemo(() => {
     return questions.filter((q) => {
-      // Ticket Filter
       if (examQTicketFilter !== 'all' && (q.ticketNumber || 1) !== examQTicketFilter) {
         return false;
       }
-      // Text Search
       if (examQSearch.trim()) {
         const needle = examQSearch.toLowerCase();
         const textMatch = q.questionText.toLowerCase().includes(needle);
         const optMatch = q.options.some((o) => o.toLowerCase().includes(needle));
         if (!textMatch && !optMatch) return false;
       }
-      // Category filter
       if (examQCatFilter !== 'all' && q.categoryId !== examQCatFilter) {
         return false;
       }
-      // Target Filter (B / C / All)
       if (examQTargetFilter === 'B') {
         if (q.categoryType === 'C' || q.groupTarget === 'group3_c') return false;
       } else if (examQTargetFilter === 'C') {
         if (q.categoryType !== 'C' && q.groupTarget !== 'group3_c' && q.groupTarget !== 'all') return false;
       }
-      // Status filter
       if (examQStatusFilter === 'included' && q.includeInExam === false) return false;
       if (examQStatusFilter === 'excluded' && q.includeInExam !== false) return false;
 
@@ -442,7 +525,6 @@ export const TestsView: React.FC = () => {
     });
   }, [questions, examQTicketFilter, examQSearch, examQCatFilter, examQTargetFilter, examQStatusFilter]);
 
-  // Start Test in Category
   const handleStartCategoryTest = (category: QuestionCategory) => {
     if (!canStudentTakeTests()) {
       alert('Преподаватель или администратор временно ограничил для вас доступ к решению тренировочных тестов и билетов. Обратитесь к администратору автошколы.');
@@ -465,6 +547,7 @@ export const TestsView: React.FC = () => {
       currentIndex: 0,
       userAnswers: {},
       skippedIndices: [],
+      optionOrder: generateOptionOrder(catQuestions, examSettings.shuffleOptions === true),
       isFinished: false,
       startTime: Date.now(),
       elapsedSeconds: 0,
@@ -472,7 +555,6 @@ export const TestsView: React.FC = () => {
     });
   };
 
-  // Trigger Exam Start (Opens ticket selection or goes straight to exam if assigned by teacher)
   const handleStartExam = () => {
     if (!isAdmin) {
       if (!canStudentTakeExam()) {
@@ -494,7 +576,6 @@ export const TestsView: React.FC = () => {
       return;
     }
 
-    // If teacher assigned a specific ticket to this student, use it directly
     if (studentAssignedTicket && typeof studentAssignedTicket === 'number') {
       setSelectedExamTicket(studentAssignedTicket);
     } else {
@@ -504,7 +585,6 @@ export const TestsView: React.FC = () => {
     setIsExamWarningOpen(true);
   };
 
-  // Confirm and Start Exam Mode with selected Ticket and anti-cheat lock
   const handleConfirmStartExam = (ticketToTakeParam?: number | 'random') => {
     const ticketToTake =
       typeof ticketToTakeParam === 'number' || ticketToTakeParam === 'random'
@@ -517,7 +597,6 @@ export const TestsView: React.FC = () => {
       return;
     }
 
-    // Verify ticket exclusivity if enabled
     if (ticketToTake !== 'random' && examSettings.uniqueTicketPerStudent !== false) {
       const alreadyOccupied = (examSettings.occupiedTickets || []).find(
         (o) => o.ticketNumber === ticketToTake && o.studentId !== currentUser?.id
@@ -531,7 +610,6 @@ export const TestsView: React.FC = () => {
         return;
       }
 
-      // Mark ticket as occupied by current student
       const updatedOccupied = [
         ...(examSettings.occupiedTickets || []).filter((o) => o.studentId !== currentUser?.id),
         {
@@ -550,7 +628,6 @@ export const TestsView: React.FC = () => {
       if (ticketQuestions.length > 0) {
         finalQuestions = [...ticketQuestions];
       } else {
-        // Fallback if specific ticket has no questions
         const qCount = Math.min(examSettings.questionCount || 20, examCandidates.length);
         finalQuestions = [...examCandidates].sort(() => 0.5 - Math.random()).slice(0, qCount);
       }
@@ -567,18 +644,12 @@ export const TestsView: React.FC = () => {
     setTabViolationsCount(0);
     setShowTabViolationAlert(false);
 
-    // Try requesting fullscreen to minimize distractions if supported
     try {
       if (document.documentElement && document.documentElement.requestFullscreen) {
-        document.documentElement.requestFullscreen().catch(() => {
-          // Ignored if user browser blocks programmatic fullscreen
-        });
+        document.documentElement.requestFullscreen().catch(() => {});
       }
-    } catch {
-      // Ignored
-    }
+    } catch {}
 
-    // Log exam start to activity log
     addActivityLog({
       userId: currentUser?.id || 'guest',
       userName: currentUser?.name || 'Курсант',
@@ -597,6 +668,7 @@ export const TestsView: React.FC = () => {
       currentIndex: 0,
       userAnswers: {},
       skippedIndices: [],
+      optionOrder: generateOptionOrder(finalQuestions, examSettings.shuffleOptions === true),
       isFinished: false,
       startTime: Date.now(),
       elapsedSeconds: 0,
@@ -604,33 +676,40 @@ export const TestsView: React.FC = () => {
     });
   };
 
-  // Select option in active test
   const handleSelectOption = (optionIndex: number) => {
     if (!activeSession || activeSession.isFinished) return;
     if (activeSession.userAnswers[activeSession.currentIndex] !== undefined) return;
 
+    setActiveSession({
+      ...activeSession,
+      selectedTempIndex: optionIndex,
+    });
+  };
+
+  const handleConfirmAnswer = () => {
+    if (!activeSession || activeSession.isFinished) return;
+    const temp = activeSession.selectedTempIndex;
+    if (temp === undefined) return;
+
     const nextAnswers = {
       ...activeSession.userAnswers,
-      [activeSession.currentIndex]: optionIndex,
+      [activeSession.currentIndex]: temp,
     };
 
     setActiveSession({
       ...activeSession,
       userAnswers: nextAnswers,
+      selectedTempIndex: undefined,
     });
   };
 
-  // Skip question to return to it later
   const handleSkipQuestion = () => {
     if (!activeSession || activeSession.isFinished) return;
     const currentIdx = activeSession.currentIndex;
     const total = activeSession.questionsList.length;
 
-    // Add current index to skippedIndices list
     const nextSkipped = Array.from(new Set([...(activeSession.skippedIndices || []), currentIdx]));
 
-    // Find next unanswered question:
-    // 1) look ahead: currentIdx + 1 .. total - 1
     let nextIdx = -1;
     for (let i = currentIdx + 1; i < total; i++) {
       if (activeSession.userAnswers[i] === undefined) {
@@ -638,7 +717,6 @@ export const TestsView: React.FC = () => {
         break;
       }
     }
-    // 2) if not found ahead, loop from start: 0 .. currentIdx - 1
     if (nextIdx === -1) {
       for (let i = 0; i < currentIdx; i++) {
         if (activeSession.userAnswers[i] === undefined) {
@@ -656,10 +734,10 @@ export const TestsView: React.FC = () => {
       ...activeSession,
       skippedIndices: nextSkipped,
       currentIndex: nextIdx,
+      selectedTempIndex: undefined,
     });
   };
 
-  // Jump to next remaining skipped question
   const handleJumpToNextSkipped = () => {
     if (!activeSession) return;
     const skippedUnanswered = (activeSession.skippedIndices || []).filter(
@@ -670,11 +748,11 @@ export const TestsView: React.FC = () => {
       setActiveSession({
         ...activeSession,
         currentIndex: nextSkipped,
+        selectedTempIndex: undefined,
       });
     }
   };
 
-  // Move to next question or finish with skipped check
   const handleNextOrFinish = () => {
     if (!activeSession) return;
     const total = activeSession.questionsList.length;
@@ -683,9 +761,9 @@ export const TestsView: React.FC = () => {
       setActiveSession({
         ...activeSession,
         currentIndex: activeSession.currentIndex + 1,
+        selectedTempIndex: undefined,
       });
     } else {
-      // Check for remaining unanswered / skipped questions
       const unansweredIndices: number[] = [];
       for (let i = 0; i < total; i++) {
         if (activeSession.userAnswers[i] === undefined) {
@@ -703,6 +781,7 @@ export const TestsView: React.FC = () => {
           setActiveSession({
             ...activeSession,
             currentIndex: unansweredIndices[0],
+            selectedTempIndex: undefined,
           });
           return;
         }
@@ -734,26 +813,25 @@ export const TestsView: React.FC = () => {
     const selectedOption = activeSession.userAnswers[activeSession.currentIndex];
     const hasAnsweredCurrent = selectedOption !== undefined;
 
-    // Exam settings flags
     const isExam = activeSession.isExamMode;
     const showImmediate = isExam ? examSettings.showImmediateFeedback === true : true;
     const allowNav = isExam ? examSettings.allowQuestionNavigation === true : true;
 
-    // Remaining time calculation
     const isTimerActive = activeSession.timeLimitSeconds > 0;
     const remainingSeconds = Math.max(0, activeSession.timeLimitSeconds - activeSession.elapsedSeconds);
     const isTimeUrgent = isTimerActive && remainingSeconds <= 120;
 
-    // Associated road sign if present
     const associatedSign = currentQ?.signId
       ? signs.find((s) => s.id === currentQ.signId)
       : null;
 
     if (activeSession.isFinished) {
-      // Finished Summary
       let correct = 0;
       activeSession.questionsList.forEach((q, i) => {
-        if (activeSession.userAnswers[i] === q.correctAnswerIndex) correct++;
+        const order = activeSession.optionOrder?.[i] || q.options.map((_, k) => k);
+        const chosen = activeSession.userAnswers[i];
+        const originalIdx = chosen !== undefined ? order[chosen] : -1;
+        if (originalIdx === q.correctAnswerIndex) correct++;
       });
       const score = Math.round((correct / totalQ) * 100);
       const passTarget = activeSession.isExamMode ? (examSettings.passingPercent || 90) : 85;
@@ -849,7 +927,6 @@ export const TestsView: React.FC = () => {
       );
     }
 
-    // Active Question Screen
     return (
       <div
         className="max-w-3xl mx-auto space-y-4 exam-anti-copy test-anti-copy select-none"
@@ -858,7 +935,6 @@ export const TestsView: React.FC = () => {
         onCut={(e) => e.preventDefault()}
         onDragStart={(e) => e.preventDefault()}
       >
-        {/* Anti-cheat Alert Modal for Tab Switching */}
         {showTabViolationAlert && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs animate-in fade-in">
             <div className="bg-white rounded-3xl max-w-md w-full p-6 text-center space-y-4 border-2 border-rose-500 shadow-2xl">
@@ -898,7 +974,6 @@ export const TestsView: React.FC = () => {
           </div>
         )}
 
-        {/* Anti-cheat Status Bar for Exam Mode */}
         {activeSession.isExamMode && (
           <div className="bg-slate-900 text-white rounded-2xl px-4 py-2.5 flex items-center justify-between gap-3 text-xs shadow-xs border border-slate-800">
             <div className="flex items-center gap-2">
@@ -923,7 +998,6 @@ export const TestsView: React.FC = () => {
           </div>
         )}
 
-        {/* Top Header Card */}
         <div className="bg-white rounded-2xl border border-neutral-200 p-4 shadow-xs flex items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <button
@@ -954,7 +1028,6 @@ export const TestsView: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Timer */}
             <div
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-mono font-bold ${
                 isTimeUrgent
@@ -971,7 +1044,6 @@ export const TestsView: React.FC = () => {
           </div>
         </div>
 
-        {/* Progress bar */}
         <div className="w-full bg-neutral-200 h-1.5 rounded-full overflow-hidden">
           <div
             className="bg-blue-600 h-full transition-all duration-300"
@@ -979,7 +1051,6 @@ export const TestsView: React.FC = () => {
           />
         </div>
 
-        {/* Interactive Question Numbers Palette */}
         <div className="bg-white rounded-2xl border border-neutral-200 p-3 shadow-xs space-y-2">
           <div className="flex items-center justify-between gap-2">
             <span className="text-[11px] font-bold text-neutral-600 flex items-center gap-1.5">
@@ -999,7 +1070,10 @@ export const TestsView: React.FC = () => {
             {activeSession.questionsList.map((q, idx) => {
               const isCurrent = idx === activeSession.currentIndex;
               const isAnswered = activeSession.userAnswers[idx] !== undefined;
-              const isCorrect = isAnswered && activeSession.userAnswers[idx] === q.correctAnswerIndex;
+              const order = activeSession.optionOrder?.[idx] || q.options.map((_, i) => i);
+              const chosenDisplayIdx = activeSession.userAnswers[idx];
+              const originalIdx = chosenDisplayIdx !== undefined ? order[chosenDisplayIdx] : -1;
+              const isCorrect = isAnswered && originalIdx === q.correctAnswerIndex;
               const isSkipped = (activeSession.skippedIndices || []).includes(idx) && !isAnswered;
 
               let pillClass = 'bg-neutral-100 text-neutral-600 border-neutral-200 hover:bg-neutral-200';
@@ -1026,6 +1100,7 @@ export const TestsView: React.FC = () => {
                           setActiveSession({
                             ...activeSession,
                             currentIndex: idx,
+                            selectedTempIndex: undefined,
                           });
                         }
                       : undefined
@@ -1055,7 +1130,6 @@ export const TestsView: React.FC = () => {
           </div>
         </div>
 
-        {/* Question Card with Anti-Copy & Anti-Selection */}
         <div
           className="bg-white rounded-3xl border border-neutral-200 p-5 sm:p-7 shadow-xs space-y-6 exam-anti-copy select-none"
           onContextMenu={(e) => e.preventDefault()}
@@ -1063,7 +1137,6 @@ export const TestsView: React.FC = () => {
           onCut={(e) => e.preventDefault()}
         >
           <div className="space-y-4">
-            {/* Associated Sign or Image */}
             {associatedSign && (
               <div className="flex items-center justify-center p-3 bg-neutral-50 rounded-2xl border border-neutral-200 overflow-hidden">
                 <div className="w-20 h-20 max-w-[80px] max-h-[80px] shrink-0 flex items-center justify-center overflow-hidden">
@@ -1089,69 +1162,75 @@ export const TestsView: React.FC = () => {
             </h3>
           </div>
 
-          {/* Options */}
           <div className="space-y-2.5">
-            {currentQ.options.map((option, idx) => {
-              const isSelected = selectedOption === idx;
-              const isCorrect = idx === currentQ.correctAnswerIndex;
+            {(() => {
+              const order = activeSession.optionOrder?.[activeSession.currentIndex]
+                || currentQ.options.map((_, i) => i);
 
-              let btnStyle = 'border-neutral-200 hover:border-neutral-300 bg-white text-neutral-800';
+              return order.map((originalIdx, displayIdx) => {
+                const option = currentQ.options[originalIdx];
+                const isTempSelected = activeSession.selectedTempIndex === displayIdx;
+                const isConfirmed = selectedOption === displayIdx;
+                const isCorrect = originalIdx === currentQ.correctAnswerIndex;
 
-              if (hasAnsweredCurrent) {
-                if (showImmediate) {
-                  if (isCorrect) {
-                    btnStyle = 'border-emerald-500 bg-emerald-50/70 text-emerald-950 font-medium';
-                  } else if (isSelected && !isCorrect) {
-                    btnStyle = 'border-rose-500 bg-rose-50/70 text-rose-950';
+                let btnStyle = 'border-neutral-200 hover:border-neutral-300 bg-white text-neutral-800';
+
+                if (hasAnsweredCurrent) {
+                  if (showImmediate) {
+                    if (isCorrect) {
+                      btnStyle = 'border-emerald-500 bg-emerald-50/70 text-emerald-950 font-medium';
+                    } else if (isConfirmed && !isCorrect) {
+                      btnStyle = 'border-rose-500 bg-rose-50/70 text-rose-950';
+                    } else {
+                      btnStyle = 'border-neutral-200 bg-neutral-50/50 text-neutral-400 opacity-60';
+                    }
                   } else {
-                    btnStyle = 'border-neutral-200 bg-neutral-50/50 text-neutral-400 opacity-60';
+                    if (isConfirmed) {
+                      btnStyle = 'border-blue-600 bg-blue-50/80 text-blue-950 font-bold ring-2 ring-blue-500/20';
+                    } else {
+                      btnStyle = 'border-neutral-200 bg-neutral-50/50 text-neutral-400 opacity-60';
+                    }
                   }
-                } else {
-                  if (isSelected) {
-                    btnStyle = 'border-blue-600 bg-blue-50/80 text-blue-950 font-bold ring-2 ring-blue-500/20';
-                  } else {
-                    btnStyle = 'border-neutral-200 bg-neutral-50/50 text-neutral-400 opacity-60';
-                  }
+                } else if (isTempSelected) {
+                  btnStyle = 'border-blue-500 bg-blue-50 text-blue-950 font-bold ring-2 ring-blue-500/30';
                 }
-              }
 
-              return (
-                <button
-                  key={idx}
-                  onClick={() => handleSelectOption(idx)}
-                  disabled={hasAnsweredCurrent}
-                  className={`w-full p-4 rounded-2xl border text-left text-xs sm:text-sm transition-all flex items-center justify-between gap-3 ${btnStyle}`}
-                >
-                  <div className="flex items-start gap-3">
-                    <span
-                      className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-mono font-bold shrink-0 mt-0.5 ${
-                        isSelected
-                          ? 'bg-neutral-900 text-white'
-                          : 'bg-neutral-100 text-neutral-600'
-                      }`}
-                    >
-                      {idx + 1}
-                    </span>
-                    <span className="leading-relaxed">{option}</span>
-                  </div>
+                return (
+                  <button
+                    key={displayIdx}
+                    onClick={() => handleSelectOption(displayIdx)}
+                    className={`w-full p-4 rounded-2xl border text-left text-xs sm:text-sm transition-all flex items-center justify-between gap-3 ${btnStyle}`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <span
+                        className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-mono font-bold shrink-0 mt-0.5 ${
+                          isTempSelected || isConfirmed
+                            ? 'bg-neutral-900 text-white'
+                            : 'bg-neutral-100 text-neutral-600'
+                        }`}
+                      >
+                        {displayIdx + 1}
+                      </span>
+                      <span className="leading-relaxed">{option}</span>
+                    </div>
 
-                  {hasAnsweredCurrent && showImmediate && isCorrect && (
-                    <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-                  )}
-                  {hasAnsweredCurrent && showImmediate && isSelected && !isCorrect && (
-                    <XCircle className="w-5 h-5 text-rose-600 shrink-0" />
-                  )}
-                  {hasAnsweredCurrent && !showImmediate && isSelected && (
-                    <span className="px-2.5 py-1 rounded-full bg-blue-100 text-blue-800 text-[11px] font-bold shrink-0">
-                      Ответ принят
-                    </span>
-                  )}
-                </button>
-              );
-            })}
+                    {hasAnsweredCurrent && showImmediate && isCorrect && (
+                      <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                    )}
+                    {hasAnsweredCurrent && showImmediate && isConfirmed && !isCorrect && (
+                      <XCircle className="w-5 h-5 text-rose-600 shrink-0" />
+                    )}
+                    {hasAnsweredCurrent && !showImmediate && isConfirmed && (
+                      <span className="px-2.5 py-1 rounded-full bg-blue-100 text-blue-800 text-[11px] font-bold shrink-0">
+                        Ответ принят
+                      </span>
+                    )}
+                  </button>
+                );
+              });
+            })()}
           </div>
 
-          {/* Explanation if answered and immediate feedback is enabled */}
           {hasAnsweredCurrent && showImmediate && currentQ.explanation && (
             <div className="p-4 bg-blue-50/60 border border-blue-200 rounded-2xl text-xs text-blue-950 space-y-1.5 animate-in fade-in duration-200">
               <span className="font-bold flex items-center gap-1.5 text-blue-900">
@@ -1162,7 +1241,6 @@ export const TestsView: React.FC = () => {
             </div>
           )}
 
-          {/* Action controls before answering: Previous + Skip + Next */}
           {!hasAnsweredCurrent && allowNav && (
             <div className="pt-2 flex items-center justify-between gap-2 border-t border-neutral-100">
               <button
@@ -1173,6 +1251,7 @@ export const TestsView: React.FC = () => {
                     setActiveSession({
                       ...activeSession,
                       currentIndex: activeSession.currentIndex - 1,
+                      selectedTempIndex: undefined,
                     });
                   }
                 }}
@@ -1189,12 +1268,27 @@ export const TestsView: React.FC = () => {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
+                  onClick={handleConfirmAnswer}
+                  disabled={activeSession.selectedTempIndex === undefined}
+                  className={`px-5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors ${
+                    activeSession.selectedTempIndex !== undefined
+                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer'
+                      : 'bg-neutral-200 text-neutral-400 cursor-not-allowed'
+                  }`}
+                  title="Подтвердить выбранный ответ"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Ответить</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={handleSkipQuestion}
                   className="px-4 py-2 bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
                   title="Пропустить вопрос и вернуться к нему позже"
                 >
                   <SkipForward className="w-4 h-4 text-amber-700" />
-                  <span>Пропустить вопрос</span>
+                  <span>Пропустить</span>
                 </button>
 
                 {activeSession.currentIndex < totalQ - 1 && (
@@ -1204,6 +1298,7 @@ export const TestsView: React.FC = () => {
                       setActiveSession({
                         ...activeSession,
                         currentIndex: activeSession.currentIndex + 1,
+                        selectedTempIndex: undefined,
                       });
                     }}
                     className="px-3 py-2 text-neutral-600 hover:bg-neutral-100 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
@@ -1216,15 +1311,28 @@ export const TestsView: React.FC = () => {
             </div>
           )}
           {!hasAnsweredCurrent && !allowNav && (
-            <div className="pt-2 flex items-center justify-between border-t border-neutral-100 text-xs text-neutral-500">
-              <span className="text-[11px]">Выберите вариант ответа для перехода дальше</span>
-              <span className="text-[10px] bg-neutral-100 text-neutral-600 font-semibold px-2 py-0.5 rounded-md">
-                Последовательный экзамен
+            <div className="pt-2 flex items-center justify-between border-t border-neutral-100 gap-2">
+              <span className="text-[11px] text-neutral-500">
+                {activeSession.selectedTempIndex !== undefined
+                  ? 'Нажмите «Ответить», чтобы подтвердить'
+                  : 'Выберите вариант ответа'}
               </span>
+              <button
+                type="button"
+                onClick={handleConfirmAnswer}
+                disabled={activeSession.selectedTempIndex === undefined}
+                className={`px-5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors ${
+                  activeSession.selectedTempIndex !== undefined
+                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer'
+                    : 'bg-neutral-200 text-neutral-400 cursor-not-allowed'
+                }`}
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Ответить</span>
+              </button>
             </div>
           )}
 
-          {/* Action controls after answering */}
           {hasAnsweredCurrent && (
             <div className="pt-2 flex items-center justify-between gap-2 border-t border-neutral-100">
               {allowNav ? (
@@ -1236,6 +1344,7 @@ export const TestsView: React.FC = () => {
                       setActiveSession({
                         ...activeSession,
                         currentIndex: activeSession.currentIndex - 1,
+                        selectedTempIndex: undefined,
                       });
                     }
                   }}
@@ -1301,7 +1410,6 @@ export const TestsView: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Top Banner Card */}
       <EditableDesignBlock
         id="tests_hero_banner"
         label="Шапка раздела тестов"
@@ -1333,17 +1441,15 @@ export const TestsView: React.FC = () => {
               </div>
 
               <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
-                {isAdmin && (
-                  <button
-                    onClick={() => setIsExamSettingsOpen(true)}
-                    className="px-3.5 py-2 bg-neutral-900 hover:bg-neutral-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors"
-                  >
-                    <Settings2 className="w-3.5 h-3.5" />
-                    <span>Настройки экзамена и таймера</span>
-                  </button>
-                )}
+                <button
+                  onClick={() => setIsExternalExamOpen(true)}
+                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors"
+                  title="Практический тест ГИБДД"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Тест как в ГИБДД</span>
+                </button>
 
-                {/* Sub-tab switcher */}
                 <div className="flex items-center p-1 bg-neutral-100 rounded-xl border border-neutral-200">
                   <button
                     onClick={() => setActiveBankTab('quizzes')}
@@ -1371,7 +1477,6 @@ export const TestsView: React.FC = () => {
               </div>
             </div>
 
-            {/* Student details from database */}
             {currentUser && (
               <div className="mt-5 pt-4 border-t border-neutral-100 flex items-center gap-2 text-xs text-neutral-600">
                 <UserCheck className="w-4 h-4 text-blue-600" />
@@ -1395,7 +1500,6 @@ export const TestsView: React.FC = () => {
 
       {activeBankTab === 'quizzes' && (
         <div className="space-y-6">
-          {/* SPECIAL EXAM CARD */}
           <EditableDesignBlock
             id="tests_exam_card"
             containerId="tests_overview_sections"
@@ -1422,7 +1526,7 @@ export const TestsView: React.FC = () => {
                   <div className="space-y-2 max-w-xl">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-400 text-neutral-950">
-                        Официальный формат ГИБДД
+                        Официальный формат
                       </span>
 
                       {!isAdmin ? (
@@ -1469,14 +1573,23 @@ export const TestsView: React.FC = () => {
                           title="Редактирование билетов, банк вопросов и все параметры государственного экзамена"
                         >
                           <Settings className="w-4 h-4 text-neutral-950" />
-                          <span>Настройки и билеты государственного экзамена</span>
+                          <span>НАСТРОЙКИ</span>
+                        </button>
+
+                        {/* НОВАЯ КНОПКА: Экспорт ведомости экзамена */}
+                        <button
+                          onClick={() => exportExamSheetCSV(testAttempts, getGroupName)}
+                          className="px-4 py-2 rounded-2xl text-xs font-black bg-emerald-600 hover:bg-emerald-700 text-white transition-all flex items-center gap-2 shadow-md cursor-pointer active:scale-95"
+                          title="Скачать ведомость экзамена в Excel (CSV)"
+                        >
+                          <Download className="w-4 h-4" />
+                          <span>ЭКСПОРТ ВЕДОМОСТИ</span>
                         </button>
                       </div>
                     )}
                   </div>
 
                   <div className="shrink-0 flex flex-col items-start md:items-end gap-3">
-                    {/* Ticket Status Indicator */}
                     {studentAssignedTicket && typeof studentAssignedTicket === 'number' ? (
                       <div className="p-3 rounded-2xl bg-amber-400/20 border border-amber-400/40 text-amber-200 text-xs flex items-center gap-2.5 max-w-sm">
                         <Lock className="w-4 h-4 text-amber-400 shrink-0" />
@@ -1502,7 +1615,7 @@ export const TestsView: React.FC = () => {
                         className="px-6 py-3 bg-amber-400 hover:bg-amber-300 text-neutral-950 font-black rounded-2xl text-sm flex items-center gap-2 shadow-lg transition-transform active:scale-95 cursor-pointer"
                       >
                         <Play className="w-4 h-4 fill-neutral-950" />
-                        <span>Начать государственный экзамен</span>
+                        <span>НАЧАТЬ ЭКЗАМЕН</span>
                       </button>
                     ) : (
                       <div className="p-4 bg-neutral-900/90 rounded-2xl border border-neutral-700 text-xs text-neutral-300 flex items-center gap-2 max-w-xs shadow-md">
@@ -1520,7 +1633,6 @@ export const TestsView: React.FC = () => {
             }}
           </EditableDesignBlock>
 
-          {/* THEMATIC CATEGORY CARDS */}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-neutral-900 uppercase tracking-wider">
@@ -1633,7 +1745,6 @@ export const TestsView: React.FC = () => {
         </div>
       )}
 
-      {/* MANAGE QUESTIONS BANK TAB (Admin only) */}
       {activeBankTab === 'manage_questions' && isAdmin && (
         <div className="space-y-4">
           <div className="bg-white rounded-2xl border border-neutral-200 p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4 shadow-xs">
@@ -1654,7 +1765,6 @@ export const TestsView: React.FC = () => {
                 </select>
               </div>
 
-              {/* Exam Pool filter */}
               <div className="flex items-center p-1 bg-neutral-100 rounded-xl border border-neutral-200 text-xs">
                 <button
                   type="button"
@@ -1695,7 +1805,6 @@ export const TestsView: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">
-              {/* Batch pool controls */}
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
@@ -1752,7 +1861,6 @@ export const TestsView: React.FC = () => {
             </div>
           </div>
 
-          {/* List of questions */}
           <div className="space-y-3">
             {questions
               .filter((q) => selectedCatFilter === 'all' || q.categoryId === selectedCatFilter)
@@ -1799,7 +1907,6 @@ export const TestsView: React.FC = () => {
                             </span>
                           )}
 
-                          {/* Exam pool tag */}
                           {isIncludedInExam ? (
                             <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1">
                               <ShieldCheck className="w-3 h-3 text-emerald-600" />
@@ -1822,7 +1929,6 @@ export const TestsView: React.FC = () => {
                     </div>
 
                     <div className="flex items-center gap-2 self-end sm:self-auto shrink-0 flex-wrap">
-                      {/* Toggle exam pool button */}
                       <button
                         type="button"
                         onClick={() => toggleQuestionExamInclusion(q.id)}
@@ -1887,7 +1993,6 @@ export const TestsView: React.FC = () => {
         </div>
       )}
 
-      {/* ADMIN EXAM & TIMER SETTINGS MODAL */}
       {isExamSettingsOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-xs">
           <div className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-neutral-200 p-6 sm:p-7 max-h-[92vh] overflow-y-auto">
@@ -1913,7 +2018,6 @@ export const TestsView: React.FC = () => {
             </div>
 
             <form onSubmit={handleSaveExamSettings} className="space-y-4 text-xs">
-              {/* Exam Access switch */}
               <div className="p-3.5 rounded-2xl border border-neutral-200 bg-neutral-50 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-neutral-800">Общий доступ к экзамену</span>
@@ -1933,7 +2037,6 @@ export const TestsView: React.FC = () => {
                 </p>
               </div>
 
-              {/* Number of Tickets (max 40) */}
               <div className="p-3.5 rounded-2xl border border-neutral-200 bg-neutral-50 space-y-2">
                 <div className="flex items-center justify-between">
                   <div>
@@ -1978,7 +2081,6 @@ export const TestsView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Immediate Feedback Toggle */}
               <div className="p-3.5 rounded-2xl border border-neutral-200 bg-neutral-50 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-neutral-800">
@@ -2003,7 +2105,6 @@ export const TestsView: React.FC = () => {
                 </p>
               </div>
 
-              {/* Question Navigation Toggle */}
               <div className="p-3.5 rounded-2xl border border-neutral-200 bg-neutral-50 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-neutral-800">
@@ -2028,7 +2129,32 @@ export const TestsView: React.FC = () => {
                 </p>
               </div>
 
-              {/* Ticket Exclusivity Toggle */}
+              {/* НОВЫЙ БЛОК: Перемешивать варианты ответов */}
+              <div className="p-3.5 rounded-2xl border border-neutral-200 bg-neutral-50 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-neutral-800 flex items-center gap-1.5">
+                    <Shuffle className="w-4 h-4 text-emerald-600" />
+                    <span>Перемешивать варианты ответов</span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={localExamSettings.shuffleOptions === true}
+                    onChange={(e) =>
+                      setLocalExamSettings({
+                        ...localExamSettings,
+                        shuffleOptions: e.target.checked,
+                      })
+                    }
+                    className="w-5 h-5 accent-emerald-600 rounded cursor-pointer"
+                  />
+                </div>
+                <p className="text-[11px] text-neutral-500">
+                  {localExamSettings.shuffleOptions === true
+                    ? 'ВКЛЮЧЕНО: варианты ответов показываются в случайном порядке — курсант не запомнит расположение правильного ответа.'
+                    : 'ВЫКЛЮЧЕНО: варианты ответов показываются в том порядке, в котором их задал администратор.'}
+                </p>
+              </div>
+
               <div className="p-3.5 rounded-2xl border border-neutral-200 bg-neutral-50 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-neutral-800">
@@ -2175,7 +2301,6 @@ export const TestsView: React.FC = () => {
         </div>
       )}
 
-      {/* ADMIN ADD/EDIT CATEGORY MODAL */}
       {isCatModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
           <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl border border-neutral-200 p-6">
@@ -2241,7 +2366,6 @@ export const TestsView: React.FC = () => {
         </div>
       )}
 
-      {/* ADMIN ADD/EDIT QUESTION MODAL */}
       {isQuestionModalOpen && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
           <div className="relative w-full max-w-xl bg-white rounded-2xl shadow-2xl border border-neutral-200 p-6 max-h-[90vh] overflow-y-auto">
@@ -2329,7 +2453,6 @@ export const TestsView: React.FC = () => {
                 />
               </div>
 
-              {/* Options */}
               <div className="space-y-2">
                 <label className="font-semibold text-neutral-700 block">
                   Варианты ответов (отметьте правильный переключателем)
@@ -2371,14 +2494,12 @@ export const TestsView: React.FC = () => {
                 />
               </div>
 
-              {/* Image Uploader with Computer File & URL support */}
               <ImageInputControl
                 label="Иллюстрация к вопросу (загрузите файл с ПК или вставьте ссылку)"
                 value={qFormData.imageUrl}
                 onChange={(val) => setQFormData({ ...qFormData, imageUrl: val })}
               />
 
-              {/* Road sign attach */}
               <div>
                 <label className="font-semibold text-neutral-700 block mb-1">
                   Привязать дорожный знак из каталога (опционально)
@@ -2397,7 +2518,6 @@ export const TestsView: React.FC = () => {
                 </select>
               </div>
 
-              {/* Include in Exam Pool toggle */}
               <div className="p-3 bg-neutral-50 rounded-xl border border-neutral-200 flex items-center justify-between gap-2">
                 <div>
                   <span className="font-semibold text-neutral-800 block text-xs">
@@ -2437,7 +2557,6 @@ export const TestsView: React.FC = () => {
         </div>
       )}
 
-      {/* PRE-EXAM WARNING & INSTRUCTION MODAL */}
       {isExamWarningOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs animate-in fade-in">
           <div className="relative w-full max-w-xl bg-white rounded-3xl shadow-2xl border border-neutral-200 p-6 sm:p-7 max-h-[92vh] overflow-y-auto space-y-5">
@@ -2448,17 +2567,16 @@ export const TestsView: React.FC = () => {
               <X className="w-5 h-5" />
             </button>
 
-            {/* Header */}
             <div className="flex items-start gap-3.5 pr-8">
               <div className="w-12 h-12 rounded-2xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs">
                 <ShieldAlert className="w-7 h-7" />
               </div>
               <div>
                 <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 block">
-                  ДОСААФ России • Экзаменационный регламент
+                  ДОСААФ Кавалерово • Экзаменационный тест
                 </span>
                 <h3 className="text-lg font-black text-neutral-900 leading-tight">
-                  Государственный экзамен по ПДД
+                  Экзамен по ПДД
                 </h3>
                 <p className="text-xs text-neutral-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
                   <span>Курсант: <strong className="text-neutral-800">{currentUser?.name || 'Курсант ДОСААФ'}</strong></span>
@@ -2477,7 +2595,6 @@ export const TestsView: React.FC = () => {
               </div>
             </div>
 
-            {/* Exam Parameters Overview */}
             <div className="grid grid-cols-3 gap-2.5 text-center">
               <div className="p-3 bg-neutral-50 rounded-2xl border border-neutral-200">
                 <span className="text-[10px] text-neutral-400 font-bold uppercase block">Вопросов</span>
@@ -2505,7 +2622,6 @@ export const TestsView: React.FC = () => {
               </div>
             </div>
 
-            {/* Ticket Selection in Modal */}
             <div className="p-3.5 bg-neutral-50 rounded-2xl border border-neutral-200 space-y-2">
               {studentAssignedTicket && typeof studentAssignedTicket === 'number' && (
                 <div className="p-3 bg-blue-50 border border-blue-200 rounded-2xl text-xs text-blue-900 flex items-center justify-between">
@@ -2579,7 +2695,6 @@ export const TestsView: React.FC = () => {
               </div>
             </div>
 
-            {/* Anti-Cheating Rules Box */}
             <div className="p-4 bg-amber-50/80 rounded-2xl border border-amber-300 space-y-3">
               <div className="flex items-center gap-2 text-amber-950 font-bold text-xs">
                 <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
@@ -2614,7 +2729,6 @@ export const TestsView: React.FC = () => {
               </ul>
             </div>
 
-            {/* Agreement Checkbox */}
             <label className="flex items-start gap-3 p-3.5 bg-neutral-50 rounded-2xl border border-neutral-200 cursor-pointer hover:bg-neutral-100 transition-colors">
               <input
                 type="checkbox"
@@ -2627,7 +2741,6 @@ export const TestsView: React.FC = () => {
               </span>
             </label>
 
-            {/* Action Buttons */}
             <div className="pt-2 flex items-center justify-end gap-2.5">
               <button
                 type="button"
@@ -2658,11 +2771,9 @@ export const TestsView: React.FC = () => {
         </div>
       )}
 
-      {/* EXAM QUESTIONS BUILDER & MANAGER MODAL (Admin) */}
       {isExamQuestionsModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-xs animate-in fade-in">
           <div className="relative w-full max-w-5xl bg-white rounded-3xl shadow-2xl border border-neutral-200 p-5 sm:p-7 max-h-[94vh] flex flex-col space-y-4">
-            {/* Header */}
             <div className="flex items-start justify-between gap-4 pb-3 border-b border-neutral-200 shrink-0">
               <div className="flex items-start gap-3">
                 <div className="w-11 h-11 rounded-2xl bg-amber-500 text-neutral-950 flex items-center justify-center shrink-0 shadow-xs font-black">
@@ -2692,7 +2803,6 @@ export const TestsView: React.FC = () => {
               </button>
             </div>
 
-            {/* Quick Stats & Ticket Size Config */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 shrink-0 text-xs">
               <div className="p-3 bg-neutral-50 rounded-2xl border border-neutral-200">
                 <span className="text-[10px] text-neutral-400 font-bold uppercase block">Всего в базе</span>
@@ -2718,10 +2828,8 @@ export const TestsView: React.FC = () => {
               </div>
             </div>
 
-            {/* Ticket parameters & Quick presets */}
             <div className="p-3.5 bg-neutral-50 rounded-2xl border border-neutral-200 flex items-center justify-between gap-4 flex-wrap shrink-0">
               <div className="flex items-center gap-6 flex-wrap text-xs">
-                {/* Custom Question Count */}
                 <div className="flex items-center gap-2">
                   <span className="font-bold text-neutral-700">Вопросов в билете:</span>
                   <div className="flex items-center gap-1.5">
@@ -2759,7 +2867,6 @@ export const TestsView: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Custom Time Limit */}
                 <div className="flex items-center gap-2">
                   <span className="font-bold text-neutral-700">Время на экзамен:</span>
                   <div className="flex items-center gap-1.5">
@@ -2798,7 +2905,6 @@ export const TestsView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Bulk Presets */}
               <div className="flex items-center gap-2 flex-wrap text-xs">
                 <span className="text-neutral-500 text-[11px] font-medium">Быстрый выбор:</span>
                 <button
@@ -2810,7 +2916,6 @@ export const TestsView: React.FC = () => {
                     });
                   }}
                   className="px-2.5 py-1 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-900 font-bold transition-colors cursor-pointer"
-                  title="Включить абсолютно все вопросы базы в экзамен"
                 >
                   Включить все
                 </button>
@@ -2822,7 +2927,6 @@ export const TestsView: React.FC = () => {
                     });
                   }}
                   className="px-2.5 py-1 rounded-lg bg-blue-100 hover:bg-blue-200 text-blue-900 font-bold transition-colors cursor-pointer"
-                  title="Включить только вопросы для легковых автомобилей (Категория B)"
                 >
                   Пакет «Кат. B»
                 </button>
@@ -2834,7 +2938,6 @@ export const TestsView: React.FC = () => {
                     });
                   }}
                   className="px-2.5 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold transition-colors cursor-pointer"
-                  title="Включить профильные вопросы для грузовых авто (Категория C)"
                 >
                   Пакет «Кат. C»
                 </button>
@@ -2847,7 +2950,6 @@ export const TestsView: React.FC = () => {
                     }
                   }}
                   className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-800 font-bold transition-colors cursor-pointer"
-                  title="Исключить все вопросы из экзамена"
                 >
                   Снять все
                 </button>
@@ -2863,8 +2965,10 @@ export const TestsView: React.FC = () => {
                       imageUrl: '',
                       signId: '',
                       groupTarget: 'all',
+                      categoryType: 'all',
                       difficulty: 'medium',
                       includeInExam: true,
+                      ticketNumber: 1,
                     });
                     setIsQuestionModalOpen(true);
                   }}
@@ -2876,7 +2980,6 @@ export const TestsView: React.FC = () => {
               </div>
             </div>
 
-            {/* Filter Bar */}
             <div className="flex items-center gap-2.5 flex-wrap shrink-0">
               <div className="relative flex-1 min-w-[200px]">
                 <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -2897,7 +3000,6 @@ export const TestsView: React.FC = () => {
                 )}
               </div>
 
-              {/* Target Class Filter (B / C / All) */}
               <div className="flex items-center gap-1 bg-neutral-100 p-1 rounded-xl text-xs font-semibold">
                 <button
                   onClick={() => setExamQTargetFilter('all')}
@@ -2927,7 +3029,6 @@ export const TestsView: React.FC = () => {
                 </button>
               </div>
 
-              {/* Status Filter */}
               <div className="flex items-center gap-1 bg-neutral-100 p-1 rounded-xl text-xs font-semibold">
                 <button
                   onClick={() => setExamQStatusFilter('all')}
@@ -2955,7 +3056,6 @@ export const TestsView: React.FC = () => {
                 </button>
               </div>
 
-              {/* Category Dropdown */}
               <select
                 value={examQCatFilter}
                 onChange={(e) => setExamQCatFilter(e.target.value)}
@@ -2970,7 +3070,6 @@ export const TestsView: React.FC = () => {
               </select>
             </div>
 
-            {/* Questions Scrollable List */}
             <div className="flex-1 overflow-y-auto space-y-3 pr-1">
               {filteredExamQuestions.length === 0 ? (
                 <div className="text-center py-12 bg-neutral-50 rounded-2xl border border-dashed border-neutral-300 space-y-2">
@@ -2995,7 +3094,6 @@ export const TestsView: React.FC = () => {
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex-1 space-y-2">
-                          {/* Badges */}
                           <div className="flex items-center gap-1.5 flex-wrap text-[10px] font-bold">
                             <span className="px-2 py-0.5 rounded-md bg-neutral-100 text-neutral-700 border">
                               № {idx + 1}
@@ -3030,7 +3128,6 @@ export const TestsView: React.FC = () => {
                             </span>
                           </div>
 
-                          {/* Image or Sign preview */}
                           {(q.imageUrl || q.signId) && (
                             <div className="flex items-center gap-3 pt-1">
                               {q.imageUrl && (
@@ -3051,12 +3148,10 @@ export const TestsView: React.FC = () => {
                             </div>
                           )}
 
-                          {/* Question Text */}
                           <p className="text-sm font-bold text-neutral-900 leading-snug">
                             {q.questionText}
                           </p>
 
-                          {/* Options preview */}
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1 text-xs">
                             {q.options.map((opt, oIdx) => {
                               const isCorrect = oIdx === q.correctAnswerIndex;
@@ -3085,9 +3180,7 @@ export const TestsView: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* Actions right side */}
                         <div className="flex flex-col items-end gap-2 shrink-0">
-                          {/* Big 1-Click Toggle */}
                           <button
                             onClick={() => {
                               updateQuestion(q.id, { includeInExam: !isIncluded });
@@ -3097,7 +3190,6 @@ export const TestsView: React.FC = () => {
                                 ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
                                 : 'bg-neutral-200 hover:bg-neutral-300 text-neutral-700'
                             }`}
-                            title={isIncluded ? 'Нажмите, чтобы исключить из экзамена' : 'Нажмите, чтобы включить в экзамен'}
                           >
                             {isIncluded ? (
                               <>
@@ -3112,7 +3204,6 @@ export const TestsView: React.FC = () => {
                             )}
                           </button>
 
-                          {/* Edit button */}
                           <button
                             onClick={() => {
                               setEditingQuestionId(q.id);
@@ -3125,8 +3216,10 @@ export const TestsView: React.FC = () => {
                                 imageUrl: q.imageUrl || '',
                                 signId: q.signId || '',
                                 groupTarget: q.groupTarget || 'all',
+                                categoryType: q.categoryType || 'all',
                                 difficulty: q.difficulty || 'medium',
                                 includeInExam: q.includeInExam !== false,
+                                ticketNumber: q.ticketNumber || 1,
                               });
                               setIsQuestionModalOpen(true);
                             }}
@@ -3136,7 +3229,6 @@ export const TestsView: React.FC = () => {
                             <span>Изменить</span>
                           </button>
 
-                          {/* Delete button */}
                           <button
                             onClick={() => {
                               if (confirm(`Удалить вопрос "${q.questionText.slice(0, 40)}..." из базы?`)) {
@@ -3156,7 +3248,6 @@ export const TestsView: React.FC = () => {
               )}
             </div>
 
-            {/* Modal Footer */}
             <div className="pt-3 border-t border-neutral-200 flex items-center justify-between gap-3 shrink-0 text-xs">
               <div className="text-neutral-500 text-[11px]">
                 Показано: <strong className="text-neutral-800">{filteredExamQuestions.length}</strong> из {questions.length} вопросов базы.
@@ -3172,7 +3263,6 @@ export const TestsView: React.FC = () => {
         </div>
       )}
 
-      {/* UNIFIED EXAM & TICKET ADMIN MODAL */}
       <ExamAdminModal
         isOpen={isExamAdminModalOpen}
         onClose={() => setIsExamAdminModalOpen(false)}
@@ -3214,6 +3304,27 @@ export const TestsView: React.FC = () => {
           setIsQuestionModalOpen(true);
         }}
       />
+
+      {isExternalExamOpen && (
+        <div className="fixed inset-0 z-[95] bg-white">
+          <button
+            onClick={() => setIsExternalExamOpen(false)}
+            className="absolute top-3 right-3 z-10 w-10 h-10 rounded-full bg-neutral-900/90 hover:bg-neutral-950 text-white flex items-center justify-center shadow-lg transition-colors"
+            title="Закрыть тест"
+          >
+            <X className="w-5 h-5" />
+          </button>
+
+          <iframe
+            src="https://pdd-exam.ru/gibdd-exam/"
+            title="Онлайн-экзамен ГИБДД"
+            className="w-full h-full border-0"
+            allow="fullscreen"
+            loading="lazy"
+            referrerPolicy="no-referrer-when-downgrade"
+          />
+        </div>
+      )}
     </div>
   );
 };
