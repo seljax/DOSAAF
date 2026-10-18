@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="UTF-8" /><title>zoom test</title></head>
+<body style="background:#f5f5f5;padding:40px">
+<div id="root"></div>
+<script type="module">
+import './src/index.css';
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { ZoomableImage } from './src/components/ZoomableImage.tsx';
+createRoot(document.getElementById('root')).render(
+  React.createElement('div', { className: 'test-anti-copy exam-anti-copy rounded-2xl border border-neutral-200 bg-neutral-100 flex items-center justify-center p-2', style:{maxWidth:700} },
+    React.createElement(ZoomableImage, { src: '/pdd-tickets/b01_q02.jpg', className: 'block max-h-60 max-w-full w-auto object-contain rounded-lg' })
+  )
+);
+</script></body></html>

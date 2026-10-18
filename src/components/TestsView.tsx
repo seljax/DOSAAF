@@ -8,6 +8,7 @@ import { useDesignEditor } from '../context/DesignEditorContext';
 import confetti from 'canvas-confetti';
 import { playSuccessSound, playFailSound } from '../utils/sound';
 import { ExamAdminModal } from './ExamAdminModal';
+import { ZoomableImage } from './ZoomableImage';
 import { exportExamSheetCSV } from '../utils/exportExamSheet';
 import {
   CheckCircle2,
@@ -67,7 +68,49 @@ interface ActiveTestSession {
   startTime: number;
   elapsedSeconds: number;
   timeLimitSeconds: number;
+  // Пробный экзамен по правилам ГИБДД: 20 основных вопросов, при 1 ошибке +5 дополнительных
+  gibdd?: {
+    mainCount: number;
+    extraAdded: boolean;
+  };
 }
+
+// ===== Пробный экзамен ГИБДД: константы и подсчёт ошибок =====
+const GIBDD_POOL_CATEGORY_ID = 'cat-pdd-tickets-abm';
+const GIBDD_MAIN_COUNT = 20;
+const GIBDD_EXTRA_COUNT = 5;
+const GIBDD_MAIN_MINUTES = 20;
+const GIBDD_EXTRA_MINUTES = 5;
+const GIBDD_SIM_CATEGORY: QuestionCategory = {
+  id: 'gibdd_sim',
+  title: 'Пробный экзамен ГИБДД',
+  description: '20 случайных вопросов из билетов ГИБДД, при одной ошибке +5 дополнительных',
+  iconName: 'ShieldCheck',
+};
+
+const countWrongInRange = (session: ActiveTestSession, from: number, to: number): number => {
+  let wrong = 0;
+  for (let i = from; i < Math.min(to, session.questionsList.length); i++) {
+    const q = session.questionsList[i];
+    const order = session.optionOrder?.[i] || q.options.map((_, k) => k);
+    const chosen = session.userAnswers[i];
+    const originalIdx = chosen !== undefined ? order[chosen] : -1;
+    if (originalIdx !== q.correctAnswerIndex) wrong++;
+  }
+  return wrong;
+};
+
+// Правило: 0 ошибок в основном блоке — сдал; 1 ошибка — +5 вопросов без права на ошибку; 2 и более — не сдал
+const getGibddVerdict = (session: ActiveTestSession) => {
+  const mainCount = session.gibdd?.mainCount ?? session.questionsList.length;
+  const mainWrong = countWrongInRange(session, 0, mainCount);
+  const extraWrong = session.gibdd?.extraAdded
+    ? countWrongInRange(session, mainCount, session.questionsList.length)
+    : 0;
+  const needExtra = !session.gibdd?.extraAdded && mainWrong === 1;
+  const passed = session.gibdd?.extraAdded ? mainWrong <= 1 && extraWrong === 0 : mainWrong === 0;
+  return { mainCount, mainWrong, extraWrong, needExtra, passed };
+};
 
 export const TestsView: React.FC = () => {
   const {
@@ -143,6 +186,7 @@ export const TestsView: React.FC = () => {
   const [examQTicketFilter, setExamQTicketFilter] = useState<number | 'all'>('all');
 
   const [isExternalExamOpen, setIsExternalExamOpen] = useState(false);
+  const [gibddExtraNoticeOpen, setGibddExtraNoticeOpen] = useState(false);
 
   useEffect(() => {
     setLocalExamSettings(examSettings);
@@ -305,8 +349,37 @@ export const TestsView: React.FC = () => {
     };
   }, [activeSession?.isExamMode, activeSession?.isFinished, addActivityLog, currentUser, groups]);
 
-  const finishActiveTest = (sessionToFinish = activeSession) => {
+  const finishActiveTest = (sessionToFinish = activeSession, forceFinish = false) => {
     if (!sessionToFinish || sessionToFinish.isFinished) return;
+
+    // Пробный экзамен ГИБДД: при одной ошибке в основном блоке выдаём дополнительный блок
+    if (sessionToFinish.gibdd && !forceFinish) {
+      const verdict = getGibddVerdict(sessionToFinish);
+      if (verdict.needExtra) {
+        const usedIds = new Set(sessionToFinish.questionsList.map((q) => q.id));
+        const pool = getGibddPool().filter((q) => !usedIds.has(q.id));
+        const extra = [...pool].sort(() => 0.5 - Math.random()).slice(0, GIBDD_EXTRA_COUNT);
+        if (extra.length > 0) {
+          const baseIndex = sessionToFinish.questionsList.length;
+          const extraOrder = generateOptionOrder(extra, examSettings.shuffleOptions === true);
+          const mergedOrder = { ...(sessionToFinish.optionOrder || {}) };
+          Object.entries(extraOrder).forEach(([k, v]) => {
+            mergedOrder[baseIndex + Number(k)] = v;
+          });
+          setActiveSession({
+            ...sessionToFinish,
+            questionsList: [...sessionToFinish.questionsList, ...extra],
+            optionOrder: mergedOrder,
+            currentIndex: baseIndex,
+            selectedTempIndex: undefined,
+            timeLimitSeconds: sessionToFinish.timeLimitSeconds + GIBDD_EXTRA_MINUTES * 60,
+            gibdd: { ...sessionToFinish.gibdd, extraAdded: true },
+          });
+          setGibddExtraNoticeOpen(true);
+          return;
+        }
+      }
+    }
 
     if (sessionToFinish.isExamMode) {
       setIsExamInProgress(false);
@@ -336,7 +409,9 @@ export const TestsView: React.FC = () => {
     const total = sessionToFinish.questionsList.length;
     const scorePercent = total > 0 ? Math.round((correctCount / total) * 100) : 0;
     const passThreshold = sessionToFinish.isExamMode ? (examSettings.passingPercent || 90) : 85;
-    const passed = scorePercent >= passThreshold;
+    const passed = sessionToFinish.gibdd
+      ? getGibddVerdict(sessionToFinish).passed
+      : scorePercent >= passThreshold;
 
     setActiveSession({
       ...sessionToFinish,
@@ -352,7 +427,9 @@ export const TestsView: React.FC = () => {
       userName: currentUser?.name || 'Ученик',
       userGroup: currentUser?.group || groups[0]?.id || '',
       categoryId: sessionToFinish.category ? sessionToFinish.category.id : 'exam_mixed',
-      categoryTitle: sessionToFinish.category
+      categoryTitle: sessionToFinish.gibdd
+        ? `Пробный экзамен ГИБДД (${sessionToFinish.gibdd.extraAdded ? '20 + 5' : '20'} вопр.)`
+        : sessionToFinish.category
         ? sessionToFinish.category.title
         : `Гос. экзамен • ${examTicketLabel} (${sessionToFinish.questionsList.length} вопр.)`,
       totalQuestions: total,
@@ -464,7 +541,7 @@ export const TestsView: React.FC = () => {
 
         if (prev.timeLimitSeconds > 0 && newElapsed >= prev.timeLimitSeconds) {
           clearInterval(interval);
-          finishActiveTest(prev);
+          finishActiveTest(prev, true);
           return { ...prev, elapsedSeconds: prev.timeLimitSeconds, isFinished: true };
         }
 
@@ -552,6 +629,41 @@ export const TestsView: React.FC = () => {
       startTime: Date.now(),
       elapsedSeconds: 0,
       timeLimitSeconds: limitSec,
+    });
+  };
+
+  // ===== Пробный экзамен ГИБДД =====
+  const getGibddPool = (): Question[] => {
+    const fromTickets = availableQuestions.filter((q) => q.categoryId === GIBDD_POOL_CATEGORY_ID);
+    return fromTickets.length >= GIBDD_MAIN_COUNT + GIBDD_EXTRA_COUNT ? fromTickets : availableQuestions;
+  };
+
+  const handleStartGibddSim = () => {
+    if (!canStudentTakeTests()) {
+      alert('Преподаватель или администратор временно ограничил для вас доступ к решению тренировочных тестов и билетов. Обратитесь к администратору автошколы.');
+      return;
+    }
+    const pool = getGibddPool();
+    if (pool.length < GIBDD_MAIN_COUNT) {
+      alert(`Для пробного экзамена нужно минимум ${GIBDD_MAIN_COUNT} вопросов в банке. Сейчас доступно: ${pool.length}.`);
+      return;
+    }
+    const picked = [...pool].sort(() => 0.5 - Math.random()).slice(0, GIBDD_MAIN_COUNT);
+
+    setGibddExtraNoticeOpen(false);
+    setActiveSession({
+      category: GIBDD_SIM_CATEGORY,
+      isExamMode: false,
+      questionsList: picked,
+      currentIndex: 0,
+      userAnswers: {},
+      skippedIndices: [],
+      optionOrder: generateOptionOrder(picked, examSettings.shuffleOptions === true),
+      isFinished: false,
+      startTime: Date.now(),
+      elapsedSeconds: 0,
+      timeLimitSeconds: GIBDD_MAIN_MINUTES * 60,
+      gibdd: { mainCount: GIBDD_MAIN_COUNT, extraAdded: false },
     });
   };
 
@@ -835,7 +947,8 @@ export const TestsView: React.FC = () => {
       });
       const score = Math.round((correct / totalQ) * 100);
       const passTarget = activeSession.isExamMode ? (examSettings.passingPercent || 90) : 85;
-      const isPass = score >= passTarget;
+      const gibddVerdict = activeSession.gibdd ? getGibddVerdict(activeSession) : null;
+      const isPass = gibddVerdict ? gibddVerdict.passed : score >= passTarget;
 
       return (
         <div className="max-w-2xl mx-auto space-y-6 animate-in fade-in duration-200">
@@ -850,10 +963,20 @@ export const TestsView: React.FC = () => {
 
             <div className="space-y-1">
               <span className="text-xs font-bold uppercase tracking-wider text-neutral-400">
-                {activeSession.isExamMode ? 'Результаты комплексного экзамена' : 'Тест завершен'}
+                {activeSession.isExamMode
+                  ? 'Результаты комплексного экзамена'
+                  : gibddVerdict
+                  ? 'Пробный экзамен ГИБДД'
+                  : 'Тест завершен'}
               </span>
               <h2 className="text-2xl font-black text-neutral-900">
-                {isPass ? 'Тест успешно сдан!' : 'Экзамен не сдан. Требуется повторение'}
+                {gibddVerdict
+                  ? isPass
+                    ? 'Экзамен сдан!'
+                    : 'Экзамен не сдан'
+                  : isPass
+                  ? 'Тест успешно сдан!'
+                  : 'Экзамен не сдан. Требуется повторение'}
               </h2>
               <p className="text-xs text-neutral-500">
                 Курсант: <strong className="text-neutral-800">{currentUser?.name || 'Курсант ДОСААФ'}</strong> •{' '}
@@ -895,8 +1018,31 @@ export const TestsView: React.FC = () => {
               </div>
             )}
 
+            {gibddVerdict && (
+              <div className="grid grid-cols-2 gap-3 max-w-md mx-auto text-left">
+                <div className={`p-3 rounded-2xl border text-xs ${gibddVerdict.mainWrong === 0 ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : gibddVerdict.mainWrong === 1 ? 'bg-amber-50 border-amber-200 text-amber-900' : 'bg-rose-50 border-rose-200 text-rose-900'}`}>
+                  <span className="font-bold block">Основной блок (20)</span>
+                  <span>Ошибок: {gibddVerdict.mainWrong}</span>
+                </div>
+                <div className={`p-3 rounded-2xl border text-xs ${!activeSession.gibdd?.extraAdded ? 'bg-neutral-50 border-neutral-200 text-neutral-500' : gibddVerdict.extraWrong === 0 ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-rose-50 border-rose-200 text-rose-900'}`}>
+                  <span className="font-bold block">Дополнительный блок (5)</span>
+                  <span>{activeSession.gibdd?.extraAdded ? `Ошибок: ${gibddVerdict.extraWrong}` : 'Не понадобился'}</span>
+                </div>
+              </div>
+            )}
+
             <p className="text-xs text-neutral-600 max-w-md mx-auto leading-relaxed">
-              {isPass
+              {gibddVerdict
+                ? isPass
+                  ? gibddVerdict.mainWrong === 0
+                    ? 'Все 20 вопросов решены без ошибок. Так держать!'
+                    : 'Одна ошибка в основном блоке, но дополнительные 5 вопросов решены без ошибок.'
+                  : gibddVerdict.mainWrong >= 2
+                  ? 'Допущено 2 и более ошибок в основных 20 вопросах. По правилам экзамен не сдан.'
+                  : activeSession.gibdd?.extraAdded
+                  ? 'Допущена ошибка в дополнительном блоке. По правилам экзамен не сдан.'
+                  : 'Время вышло. Экзамен не сдан.'
+                : isPass
                 ? 'Отличный результат! Ответы внесены в общую ведомость успеваемости преподавателя.'
                 : `Для сдачи необходимо набрать не менее ${passTarget}%. Рекомендуем повторить правила и попробовать снова.`}
             </p>
@@ -904,7 +1050,9 @@ export const TestsView: React.FC = () => {
             <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
               <button
                 onClick={() => {
-                  if (activeSession.isExamMode) {
+                  if (activeSession.gibdd) {
+                    handleStartGibddSim();
+                  } else if (activeSession.isExamMode) {
                     handleStartExam();
                   } else if (activeSession.category) {
                     handleStartCategoryTest(activeSession.category);
@@ -935,6 +1083,32 @@ export const TestsView: React.FC = () => {
         onCut={(e) => e.preventDefault()}
         onDragStart={(e) => e.preventDefault()}
       >
+        {gibddExtraNoticeOpen && activeSession.gibdd?.extraAdded && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-in fade-in">
+            <div className="bg-white rounded-3xl max-w-md w-full p-6 text-center space-y-4 border-2 border-amber-400 shadow-2xl">
+              <div className="w-14 h-14 bg-amber-100 text-amber-600 rounded-2xl mx-auto flex items-center justify-center">
+                <AlertTriangle className="w-8 h-8" />
+              </div>
+              <div className="space-y-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-600">
+                  Пробный экзамен ГИБДД
+                </span>
+                <h3 className="text-lg font-black text-neutral-900">Допущена одна ошибка</h3>
+                <p className="text-xs text-neutral-600 leading-relaxed">
+                  По правилам экзамена вам добавлено <strong>{GIBDD_EXTRA_COUNT} дополнительных вопросов</strong> и{' '}
+                  <strong>{GIBDD_EXTRA_MINUTES} минут</strong>. В дополнительном блоке ошибаться нельзя: любая ошибка означает, что экзамен не сдан.
+                </p>
+              </div>
+              <button
+                onClick={() => setGibddExtraNoticeOpen(false)}
+                className="w-full py-2.5 bg-neutral-900 hover:bg-neutral-800 text-white rounded-xl text-xs font-bold transition-colors shadow-sm"
+              >
+                Продолжить
+              </button>
+            </div>
+          </div>
+        )}
+
         {showTabViolationAlert && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs animate-in fade-in">
             <div className="bg-white rounded-3xl max-w-md w-full p-6 text-center space-y-4 border-2 border-rose-500 shadow-2xl">
@@ -1023,6 +1197,19 @@ export const TestsView: React.FC = () => {
               </span>
               <span className="text-xs font-bold text-neutral-900">
                 Вопрос {activeSession.currentIndex + 1} из {totalQ}
+                {activeSession.gibdd && (
+                  <span
+                    className={`ml-2 px-1.5 py-0.5 rounded-md text-[10px] font-bold ${
+                      activeSession.currentIndex >= activeSession.gibdd.mainCount
+                        ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                        : 'bg-blue-50 text-blue-700 border border-blue-200'
+                    }`}
+                  >
+                    {activeSession.currentIndex >= activeSession.gibdd.mainCount
+                      ? 'Доп. блок — без ошибок'
+                      : 'Основной блок'}
+                  </span>
+                )}
               </span>
             </div>
           </div>
@@ -1146,13 +1333,12 @@ export const TestsView: React.FC = () => {
             )}
 
             {currentQ.imageUrl && (
-              <div className="rounded-2xl overflow-hidden border border-neutral-200 bg-neutral-100 max-h-64 flex items-center justify-center p-2">
-                <img
+              <div className="rounded-2xl border border-neutral-200 bg-neutral-100 flex items-center justify-center p-2">
+                <ZoomableImage
                   src={currentQ.imageUrl}
                   alt="Иллюстрация к вопросу"
-                  referrerPolicy="no-referrer"
-                  draggable={false}
-                  className="max-h-60 max-w-full w-auto object-contain rounded-lg shrink-0 pointer-events-none select-none"
+                  caption={currentQ.questionText}
+                  className="block max-h-60 max-w-full w-auto object-contain rounded-lg"
                 />
               </div>
             )}
@@ -1632,6 +1818,37 @@ export const TestsView: React.FC = () => {
               );
             }}
           </EditableDesignBlock>
+
+          {(() => {
+            const gibddPoolSize = getGibddPool().length;
+            return (
+              <div className="bg-white rounded-3xl border border-neutral-200 p-5 sm:p-6 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-5">
+                <div className="space-y-2 max-w-xl">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                      Тренировка
+                    </span>
+                    <span className="text-[11px] font-semibold text-neutral-500">
+                      Банк: {gibddPoolSize} вопр.
+                    </span>
+                  </div>
+                  <h3 className="text-lg sm:text-xl font-black text-neutral-900">Пробный экзамен ГИБДД</h3>
+                  <p className="text-xs text-neutral-500 leading-relaxed">
+                    {GIBDD_MAIN_COUNT} случайных вопросов из билетов, {GIBDD_MAIN_MINUTES} минут. Без ошибок — экзамен сдан.
+                    Одна ошибка — ещё {GIBDD_EXTRA_COUNT} вопросов и {GIBDD_EXTRA_MINUTES} минут, в которых ошибаться нельзя.
+                    Две ошибки и больше — экзамен не сдан.
+                  </p>
+                </div>
+                <button
+                  onClick={handleStartGibddSim}
+                  className="shrink-0 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-2xl text-sm flex items-center justify-center gap-2 shadow-md transition-transform active:scale-95 cursor-pointer"
+                >
+                  <Play className="w-4 h-4 fill-white" />
+                  <span>НАЧАТЬ ПРОБНЫЙ ЭКЗАМЕН</span>
+                </button>
+              </div>
+            );
+          })()}
 
           <div className="space-y-4">
             <div className="flex items-center justify-between">

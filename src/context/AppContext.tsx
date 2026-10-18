@@ -12,6 +12,7 @@ import {
   INITIAL_ADMIN_CREDENTIALS, INITIAL_ACTIVITY_LOGS, INITIAL_FOOTER_SETTINGS,
   INITIAL_NAV_TABS, INITIAL_SITE_INFO, INITIAL_ACCESS_REQUESTS,
 } from '../data/initialData';
+import { SIGNS_CATALOG, SIGNS_CATALOG_VERSION } from '../data/signsCatalog';
 
 // ==================== API-ХРАНИЛИЩЕ ====================
 
@@ -31,16 +32,82 @@ async function loadAllFromServer(): Promise<Record<string, any>> {
   }
 }
 
+// Незавершённые сохранения: перед повторной загрузкой данных дожидаемся их, чтобы не получить устаревшее состояние
+const pendingSaves = new Set<Promise<void>>();
+
+// Прямые установщики состояния (без повторной отправки на сервер) — для обновления данных после входа
+const rawStateSetters: Record<string, (value: any) => void> = {};
+
 // Сохранить одно значение на сервере
-async function saveToServer(key: string, value: any): Promise<void> {
+function saveToServer(key: string, value: any): Promise<void> {
+  const p = (async () => {
+    try {
+      await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, value }),
+      });
+    } catch (err) {
+      console.warn(`Не удалось сохранить ${key} на сервере:`, err);
+    }
+  })();
+  pendingSaves.add(p);
+  p.finally(() => pendingSaves.delete(p));
+  return p;
+}
+
+export type ReloadProgress = { loadedBytes: number; totalBytes: number | null };
+
+// Загрузить свежие данные с сервера с отслеживанием реального прогресса (по байтам ответа)
+export async function reloadAllFromServer(
+  onProgress?: (p: ReloadProgress) => void
+): Promise<{ ok: boolean; bytes: number; keys: number }> {
+  // Даём React применить отложенные обновления и дожидаемся всех незавершённых сохранений
+  await new Promise((r) => setTimeout(r, 30));
+  if (pendingSaves.size > 0) {
+    await Promise.allSettled(Array.from(pendingSaves));
+  }
+
   try {
-    await fetch(API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, value }),
-    });
+    const res = await fetch(API_URL, { cache: 'no-store' });
+    if (!res.ok) throw new Error('Network error');
+
+    const lengthHeader = res.headers.get('Content-Length');
+    const totalBytes = lengthHeader ? Number(lengthHeader) || null : null;
+    let text = '';
+    let loadedBytes = 0;
+
+    if (res.body && typeof res.body.getReader === 'function') {
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        loadedBytes += value.byteLength;
+        text += decoder.decode(value, { stream: true });
+        onProgress?.({ loadedBytes, totalBytes });
+      }
+      text += decoder.decode();
+    } else {
+      text = await res.text();
+      loadedBytes = text.length;
+      onProgress?.({ loadedBytes, totalBytes: loadedBytes });
+    }
+
+    const json = JSON.parse(text);
+    const data: Record<string, any> = json.data || {};
+    let applied = 0;
+    for (const [key, value] of Object.entries(data)) {
+      const setter = rawStateSetters[key];
+      if (setter) {
+        setter(value);
+        applied++;
+      }
+    }
+    return { ok: true, bytes: loadedBytes, keys: applied };
   } catch (err) {
-    console.warn(`Не удалось сохранить ${key} на сервере:`, err);
+    console.warn('Не удалось обновить данные с сервера:', err);
+    return { ok: false, bytes: 0, keys: 0 };
   }
 }
 
@@ -114,6 +181,18 @@ function useSyncedState<T>(
       syncedRef.current = true;
     }
   }, [serverData, key]);
+
+  useEffect(() => {
+    rawStateSetters[key] = (value: any) => {
+      setState(value as T);
+      try {
+        localStorage.setItem(`avtoshkola_${key}_v2`, JSON.stringify(value));
+      } catch {}
+    };
+    return () => {
+      delete rawStateSetters[key];
+    };
+  }, [key]);
 
   const setAndSave = useCallback(
     (value: T | ((prev: T) => T)) => {
@@ -284,6 +363,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [groups, setGroups] = useSyncedState<GroupConfig[]>('groups', INITIAL_GROUPS, serverData);
   const [signs, setSigns] = useSyncedState<RoadSign[]>('signs', INITIAL_SIGNS, serverData);
+  const [signsCatalogVersion, setSignsCatalogVersion] = useSyncedState<number>('signsCatalogVersion', 0, serverData);
   const [rules, setRules] = useSyncedState<RoadRule[]>('rules', INITIAL_RULES, serverData);
   const [categories, setCategories] = useSyncedState<QuestionCategory[]>('categories', INITIAL_CATEGORIES, serverData);
   const [questions, setQuestions] = useSyncedState<Question[]>('questions', INITIAL_QUESTIONS, serverData);
@@ -301,6 +381,62 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [appTheme, setAppThemeState] = useSyncedState<AppTheme>('appTheme', 'light', serverData);
   const [accessRequests, setAccessRequests] = useSyncedState<AccessRequest[]>('access_requests', INITIAL_ACCESS_REQUESTS, serverData);
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
+
+  // Обновление версии сайта: если сохранённые сведения о сайте старее текущей версии — подтягиваем новую версию и журнал изменений
+  useEffect(() => {
+    if (Object.keys(serverData).length === 0) return;
+    const baseInfo: SiteInfoSettings = (serverData.siteInfo as SiteInfoSettings) || siteInfo;
+    const toNum = (v?: string) => {
+      const m = (v || '').match(/(\d+)\.(\d+)\.?(\d+)?/);
+      return m ? Number(m[1]) * 1e6 + Number(m[2]) * 1e3 + Number(m[3] || 0) : 0;
+    };
+    if (toNum(baseInfo.version) >= toNum(INITIAL_SITE_INFO.version)) return;
+    const known = new Set((baseInfo.changelog || []).map((c) => c.version));
+    const newEntries = INITIAL_SITE_INFO.changelog.filter(
+      (c) => !known.has(c.version) && toNum(c.version) > toNum(baseInfo.version)
+    );
+    setSiteInfo({
+      ...baseInfo,
+      version: INITIAL_SITE_INFO.version,
+      releaseDate: INITIAL_SITE_INFO.releaseDate,
+      changelog: [...newEntries, ...(baseInfo.changelog || [])],
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverData, siteInfo.version]);
+
+  // Однократное добавление полного каталога дорожных знаков (Приложение 1 к ПДД).
+  // Берём данные прямо из ответа сервера, чтобы не смешать их с устаревшим локальным состоянием.
+  // Существующие знаки не перезаписываются: им только подставляется официальная картинка,
+  // если у них не было своей или она загружалась со стороннего сайта.
+  const signsCatalogAppliedRef = useRef(false);
+  useEffect(() => {
+    if (signsCatalogAppliedRef.current) return;
+    if (Object.keys(serverData).length === 0) return;
+    const serverVersion = typeof serverData.signsCatalogVersion === 'number' ? serverData.signsCatalogVersion : 0;
+    if (serverVersion >= SIGNS_CATALOG_VERSION || signsCatalogVersion >= SIGNS_CATALOG_VERSION) {
+      signsCatalogAppliedRef.current = true;
+      return;
+    }
+    signsCatalogAppliedRef.current = true;
+
+    const base: RoadSign[] = Array.isArray(serverData.signs) ? serverData.signs : signs;
+    const byNumber = new Map(base.map((s) => [s.number, s]));
+    const merged: RoadSign[] = base.map((s) => {
+      const official = SIGNS_CATALOG.find((c) => c.number === s.number);
+      if (official && (!s.imageUrl || /^https?:\/\//i.test(s.imageUrl))) {
+        return { ...s, imageUrl: official.imageUrl };
+      }
+      return s;
+    });
+    const usedIds = new Set(merged.map((s) => s.id));
+    for (const c of SIGNS_CATALOG) {
+      if (byNumber.has(c.number)) continue;
+      merged.push(usedIds.has(c.id) ? { ...c, id: `${c.id}-pdd` } : c);
+    }
+    setSigns(merged);
+    setSignsCatalogVersion(SIGNS_CATALOG_VERSION);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverData]);
 
   useEffect(() => {
     const root = document.documentElement;

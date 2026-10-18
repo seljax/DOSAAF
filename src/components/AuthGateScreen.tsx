@@ -14,6 +14,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { LoginBackgroundSlideshow } from './LoginBackgroundSlideshow';
+import { WheelLoadingPanel } from './WheelLoader';
 
 interface AuthGateScreenProps {
   onLoginSuccess: (userName: string, role: 'student' | 'admin') => void;
@@ -261,6 +262,23 @@ export const AuthGateScreen: React.FC<AuthGateScreenProps> = ({ onLoginSuccess }
     <div className="portal-grid-bg min-h-screen text-[#f2efeb] flex items-center justify-center p-4 sm:p-6 md:p-8 font-sans selection:bg-[#f59e0b] selection:text-black relative overflow-hidden">
       <LoginBackgroundSlideshow />
 
+      {(studentLoading || adminLoading) && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-6 select-none">
+          <WheelLoadingPanel
+            badge={adminLoading ? 'ВХОД АДМИНИСТРАТОРА' : 'ВХОД КУРСАНТА'}
+            title="ПРОВЕРКА ДОСТУПА"
+            subtitle={adminLoading ? adminLogin.trim() || 'Администратор' : studentInput.trim()}
+            steps={[
+              { id: 'auth', label: 'Проверка логина и пароля на сервере', status: 'active' },
+              { id: 'data', label: 'Загрузка данных с сервера', status: 'pending' },
+              { id: 'assets', label: 'Загрузка изображений и шрифтов', status: 'pending' },
+              { id: 'ui', label: 'Подготовка интерфейса', status: 'pending' },
+            ]}
+            progress={5}
+          />
+        </div>
+      )}
+
       <div
         className="relative z-10 w-full max-w-[1000px] grid grid-cols-1 md:grid-cols-2 border border-[rgba(242,239,235,0.15)] bg-[#111113]/95 backdrop-blur-md animate-in fade-in zoom-in-95 duration-200"
         style={{ boxShadow: '0 40px 100px rgba(0,0,0,0.85)' }}
@@ -291,7 +309,7 @@ export const AuthGateScreen: React.FC<AuthGateScreenProps> = ({ onLoginSuccess }
           </div>
 
           <div className="font-jetbrains text-[9px] uppercase tracking-widest text-[rgba(242,239,235,0.35)] flex justify-between mt-10 pt-6 border-t border-[rgba(242,239,235,0.06)]">
-            <span>Версия v.0.10</span>
+            <span>Версия v.0.11</span>
             <span>Сборка 2026</span>
           </div>
         </aside>
@@ -928,7 +946,7 @@ export const AuthGateScreen: React.FC<AuthGateScreenProps> = ({ onLoginSuccess }
 
           <div className="font-jetbrains text-[9px] uppercase tracking-widest text-[rgba(242,239,235,0.3)] flex justify-between mt-8 pt-4 border-t border-[rgba(242,239,235,0.06)]">
             <span>Создатель: Мельник Сергей</span>
-            <span>Версия v.0.10</span>
+            <span>Версия v.0.11</span>
           </div>
         </section>
       </div>

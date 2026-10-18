@@ -65,11 +65,23 @@ export const RulesAndSignsView: React.FC = () => {
     { key: 'mandatory', label: 'Предписывающие' },
     { key: 'special', label: 'Особых предписаний' },
     { key: 'information', label: 'Информационные' },
+    { key: 'service', label: 'Сервиса' },
+    { key: 'additional', label: 'Таблички' },
   ];
 
   // Filtered signs
   const filteredSigns = useMemo(() => {
-    return signs.filter((s) => {
+    // Естественная сортировка по номеру: 1.2 < 1.10, 5.15.2 < 5.15.10
+    const cmpNumber = (a: string, b: string) => {
+      const pa = a.split('.').map((x) => parseInt(x, 10) || 0);
+      const pb = b.split('.').map((x) => parseInt(x, 10) || 0);
+      for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        const d = (pa[i] ?? -1) - (pb[i] ?? -1);
+        if (d !== 0) return d;
+      }
+      return 0;
+    };
+    return [...signs].sort((a, b) => cmpNumber(a.number, b.number)).filter((s) => {
       const matchesCat = selectedCategory === 'all' || s.category === selectedCategory;
       const q = searchQuery.toLowerCase().trim();
       const matchesSearch =
@@ -493,7 +505,7 @@ export const RulesAndSignsView: React.FC = () => {
       {/* Modal: View Sign Details */}
       {viewingSign && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-neutral-200 overflow-hidden flex flex-col p-6">
+          <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-neutral-200 max-h-[90vh] overflow-y-auto flex flex-col p-6">
             <button
               onClick={() => setViewingSign(null)}
               className="absolute right-4 top-4 p-2 text-neutral-400 hover:text-neutral-700 rounded-xl hover:bg-neutral-100"
@@ -503,7 +515,7 @@ export const RulesAndSignsView: React.FC = () => {
 
             <div className="flex flex-col items-center text-center">
               <div className="mb-4">
-                <RoadSignSvg sign={viewingSign} size="xl" />
+                <RoadSignSvg sign={viewingSign} size={160} />
               </div>
               <div className="inline-block px-2.5 py-0.5 rounded bg-neutral-100 text-neutral-700 font-mono text-xs font-bold mb-1">
                 Знак {viewingSign.number}
@@ -521,6 +533,10 @@ export const RulesAndSignsView: React.FC = () => {
                   ? 'Предписывающие знаки'
                   : viewingSign.category === 'special'
                   ? 'Знаки особых предписаний'
+                  : viewingSign.category === 'service'
+                  ? 'Знаки сервиса'
+                  : viewingSign.category === 'additional'
+                  ? 'Знаки дополнительной информации (таблички)'
                   : 'Информационные знаки'}
               </p>
             </div>
@@ -530,12 +546,12 @@ export const RulesAndSignsView: React.FC = () => {
                 <span className="font-bold text-neutral-900 block mb-1">Описание по ПДД:</span>
                 <p>{viewingSign.description}</p>
               </div>
-              <div className="bg-blue-50/70 p-3 rounded-xl border border-blue-100 text-blue-950">
-                <span className="font-bold text-blue-900 block mb-1">
-                  Что обязан делать водитель (Категория B):
-                </span>
-                <p>{viewingSign.meaning}</p>
-              </div>
+              {viewingSign.meaning && viewingSign.meaning.trim() !== '' && (
+                <div className="bg-blue-50/70 p-3 rounded-xl border border-blue-100 text-blue-950">
+                  <span className="font-bold text-blue-900 block mb-1">Важно знать:</span>
+                  <p>{viewingSign.meaning}</p>
+                </div>
+              )}
             </div>
 
             <div className="mt-6 flex justify-end">
@@ -643,6 +659,7 @@ export const RulesAndSignsView: React.FC = () => {
                     <option value="special">Особых предписаний</option>
                     <option value="information">Информационные</option>
                     <option value="service">Знаки сервиса</option>
+                    <option value="additional">Таблички (доп. информация)</option>
                   </select>
                 </div>
               </div>

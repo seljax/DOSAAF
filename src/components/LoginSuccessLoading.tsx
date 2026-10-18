@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { CheckCircle2, Loader2 } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { reloadAllFromServer } from '../context/AppContext';
+import { WheelLoadingPanel, LoadingStep } from './WheelLoader';
 
 interface LoginSuccessLoadingProps {
   userName: string;
@@ -7,96 +8,103 @@ interface LoginSuccessLoadingProps {
   onFinished: () => void;
 }
 
-export const LoginSuccessLoading: React.FC<LoginSuccessLoadingProps> = ({
-  userName,
-  role,
-  onFinished,
-}) => {
-  const [progress, setProgress] = useState(15);
-  const [phase, setPhase] = useState<'auth' | 'sync' | 'ready'>('auth');
+// Изображения интерфейса, которые нужны сразу после входа
+const PRELOAD_IMAGES = ['/favicon.jpeg', '/dosaaf_logo.jpg'];
+
+// Минимальное время показа, чтобы экран не «мигал» на быстрых сетях
+const MIN_VISIBLE_MS = 1200;
+
+const preloadImage = (src: string) =>
+  new Promise<void>((resolve) => {
+    const img = new Image();
+    const done = () => resolve();
+    img.onload = done;
+    img.onerror = done;
+    img.src = src;
+    setTimeout(done, 8000);
+  });
+
+const formatBytes = (bytes: number) =>
+  bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} МБ` : `${Math.max(1, Math.round(bytes / 1024))} КБ`;
+
+export const LoginSuccessLoading: React.FC<LoginSuccessLoadingProps> = ({ userName, role, onFinished }) => {
+  const [steps, setSteps] = useState<LoadingStep[]>([
+    { id: 'auth', label: 'Логин и пароль проверены', status: 'done' },
+    { id: 'data', label: 'Загрузка данных с сервера', status: 'active' },
+    { id: 'assets', label: 'Загрузка изображений и шрифтов', status: 'pending' },
+    { id: 'ui', label: 'Подготовка интерфейса', status: 'pending' },
+  ]);
+  const [progress, setProgress] = useState(10);
+  const onFinishedRef = useRef(onFinished);
+  onFinishedRef.current = onFinished;
 
   useEffect(() => {
-    const t1 = setTimeout(() => {
-      setProgress(55);
-      setPhase('sync');
-    }, 450);
+    let cancelled = false;
+    const startedAt = Date.now();
 
-    const t2 = setTimeout(() => {
+    const setStep = (id: string, patch: Partial<LoadingStep>) => {
+      if (cancelled) return;
+      setSteps((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+    };
+
+    (async () => {
+      // 1. Свежие данные с сервера — прогресс по реально полученным байтам (10% → 70%)
+      const result = await reloadAllFromServer(({ loadedBytes, totalBytes }) => {
+        if (cancelled) return;
+        const ratio = totalBytes ? Math.min(1, loadedBytes / totalBytes) : 0.5;
+        setProgress(10 + ratio * 60);
+        setStep('data', { detail: formatBytes(loadedBytes) });
+      });
+      setStep(
+        'data',
+        result.ok
+          ? { status: 'done', detail: formatBytes(result.bytes) }
+          : { status: 'error', detail: 'нет связи, используются сохранённые данные' }
+      );
+      if (!cancelled) setProgress(70);
+
+      // 2. Изображения и шрифты (70% → 95%)
+      setStep('assets', { status: 'active' });
+      const tasks: Promise<unknown>[] = PRELOAD_IMAGES.map(preloadImage);
+      if (typeof document !== 'undefined' && (document as any).fonts?.ready) {
+        tasks.push((document as any).fonts.ready);
+      }
+      let finished = 0;
+      await Promise.all(
+        tasks.map((t) =>
+          t.then(() => {
+            finished++;
+            if (!cancelled) setProgress(70 + (finished / tasks.length) * 25);
+          })
+        )
+      );
+      setStep('assets', { status: 'done', detail: `${tasks.length} из ${tasks.length}` });
+
+      // 3. Готово
+      setStep('ui', { status: 'active' });
+      const left = MIN_VISIBLE_MS - (Date.now() - startedAt);
+      if (left > 0) await new Promise((r) => setTimeout(r, left));
+      if (cancelled) return;
+      setStep('ui', { status: 'done' });
       setProgress(100);
-      setPhase('ready');
-    }, 1050);
-
-    const t3 = setTimeout(() => {
-      onFinished();
-    }, 1600);
+      await new Promise((r) => setTimeout(r, 350));
+      if (!cancelled) onFinishedRef.current();
+    })();
 
     return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
+      cancelled = true;
     };
-  }, [onFinished]);
+  }, []);
 
   return (
     <div className="fixed inset-0 z-50 portal-grid-bg flex flex-col items-center justify-center p-6 text-[#f2efeb] select-none">
-      <div
-        className="w-full max-w-md bg-[#1a1a1c] border border-[rgba(242,239,235,0.15)] p-8 sm:p-10 flex flex-col items-center text-center space-y-6 animate-in fade-in zoom-in-95 duration-200"
-        style={{ boxShadow: '0 30px 80px rgba(0,0,0,0.85)' }}
-      >
-        {/* Logo box matching Variation 3 */}
-        <div className="relative">
-          <div className="w-16 h-16 bg-white p-1 border-2 border-[#f59e0b] shadow-lg flex items-center justify-center">
-            <img
-              src="/favicon.jpeg"
-              alt="ДОСААФ"
-              className="w-full h-full object-contain"
-              referrerPolicy="no-referrer"
-            />
-          </div>
-          <div className="absolute -bottom-1 -right-1 bg-[#f59e0b] text-black p-0.5 shadow-md">
-            <CheckCircle2 className="w-4 h-4 stroke-[3]" />
-          </div>
-        </div>
-
-        {/* Text descriptions */}
-        <div className="space-y-1.5 w-full">
-          <span className="font-jetbrains text-[10px] uppercase tracking-[0.2em] text-[#f59e0b] block">
-            // {role === 'admin' ? 'ДОСТУП АДМИНИСТРАТОРА' : 'ДОСТУП КУРСАНТА'}
-          </span>
-          <h2 className="font-oswald text-2xl sm:text-3xl uppercase font-bold text-[#f2efeb] tracking-wide">
-            {role === 'admin' ? 'СЕССИЯ АВТОРИЗОВАНА' : 'ДОБРО ПОЖАЛОВАТЬ!'}
-          </h2>
-          <p className="font-jetbrains text-xs text-[rgba(242,239,235,0.7)] mt-1">
-            Пользователь: {userName || (role === 'admin' ? 'АДМИНИСТРАТОР' : 'КУРСАНТ')}
-          </p>
-        </div>
-
-        {/* Tactical Progress Bar & Phase Status */}
-        <div className="w-full space-y-3 pt-2">
-          <div className="w-full bg-[#111113] border border-[rgba(242,239,235,0.15)] h-3 overflow-hidden p-0.5">
-            <div
-              className="bg-[#f59e0b] h-full transition-all duration-500 ease-out"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-
-          <div className="flex items-center justify-between font-jetbrains text-[11px] text-[rgba(242,239,235,0.6)]">
-            <span className="flex items-center gap-1.5">
-              <Loader2 className="w-3.5 h-3.5 animate-spin text-[#f59e0b]" />
-              {phase === 'auth' && 'Регулировка сидения и зеркал...'}
-              {phase === 'sync' && 'Пристёгиваем ремень безопасности...'}
-              {phase === 'ready' && 'Поехали!'}
-            </span>
-            <span className="text-[#f59e0b] font-bold">{progress}%</span>
-          </div>
-        </div>
-
-        {/* Bottom telemetry */}
-        <div className="w-full pt-4 border-t border-[rgba(242,239,235,0.08)] flex justify-between font-jetbrains text-[9px] text-[rgba(242,239,235,0.35)] tracking-widest uppercase">
-          <span>Узел: ДОСААФ</span>
-          <span>Версия v.0.10</span>
-        </div>
-      </div>
+      <WheelLoadingPanel
+        badge={role === 'admin' ? 'ДОСТУП АДМИНИСТРАТОРА' : 'ДОСТУП КУРСАНТА'}
+        title={role === 'admin' ? 'СЕССИЯ АВТОРИЗОВАНА' : 'ДОБРО ПОЖАЛОВАТЬ!'}
+        subtitle={`Пользователь: ${userName || (role === 'admin' ? 'АДМИНИСТРАТОР' : 'КУРСАНТ')}`}
+        steps={steps}
+        progress={progress}
+      />
     </div>
   );
 };
